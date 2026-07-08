@@ -14,8 +14,9 @@ const POSITION_SHORT: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "
 
 export function LockerScreen() {
   const { setScreen, teams, activeLockerTeam, setActiveLockerTeam, settings, setTeams } = useGame();
-  const team = teams[activeLockerTeam];
-  if (!team) return null;
+  const maybeTeam = teams[activeLockerTeam];
+  if (!maybeTeam) return null;
+  const team: Team = maybeTeam;
   const otherIdx = activeLockerTeam === 0 ? 1 : 0;
 
   const [, forceTick] = useState(0);
