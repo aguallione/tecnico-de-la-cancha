@@ -1,0 +1,246 @@
+import { useMemo, useState } from "react";
+import { useGame } from "@/lib/football/store";
+import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
+import { autoLineup } from "@/lib/football/bot";
+import type { FormationName, Player, Position, Style, Team } from "@/lib/football/types";
+
+const POSITION_LABEL: Record<Position, string> = {
+  GK: "Arquero",
+  DEF: "Defensor",
+  MID: "Mediocampista",
+  FWD: "Delantero",
+};
+const POSITION_SHORT: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
+
+export function LockerScreen() {
+  const { setScreen, teams, activeLockerTeam, setActiveLockerTeam, settings, setTeams } = useGame();
+  const maybeTeam = teams[activeLockerTeam];
+  if (!maybeTeam) return null;
+  const team: Team = maybeTeam;
+  const otherIdx = activeLockerTeam === 0 ? 1 : 0;
+
+  const [, forceTick] = useState(0);
+  const rerender = () => forceTick((n) => n + 1);
+  const [error, setError] = useState<string | null>(null);
+
+  const slots = useMemo(() => slotsFor(team.formation), [team.formation]);
+
+  function changeFormation(f: FormationName) {
+    team.formation = f;
+    team.starting = autoLineup(team.squad, f);
+    // Actualizar pateadores/capitán si dejaron de ser titulares
+    const starters = team.squad.filter((p) => team.starting.includes(p.id));
+    if (!team.captainId || !starters.some((p) => p.id === team.captainId)) team.captainId = starters[0]?.id;
+    if (!team.penaltyTakerId || !starters.some((p) => p.id === team.penaltyTakerId))
+      team.penaltyTakerId = [...starters].sort((a, b) => b.attack - a.attack)[0]?.id;
+    if (!team.setPieceTakerId || !starters.some((p) => p.id === team.setPieceTakerId))
+      team.setPieceTakerId = team.penaltyTakerId;
+    setError(null);
+    rerender();
+  }
+
+  function swapSlot(slotIndex: number, newPlayerId: string) {
+    const current = team.starting[slotIndex];
+    if (current === newPlayerId) return;
+    const otherSlot = team.starting.indexOf(newPlayerId);
+    if (otherSlot >= 0) {
+      // ya titular: intercambiar
+      team.starting[otherSlot] = current;
+    }
+    team.starting[slotIndex] = newPlayerId;
+    setError(null);
+    rerender();
+  }
+
+  function confirmTeam() {
+    // Validación: los 11 no vacíos y GK presente
+    if (team.starting.length !== 11 || team.starting.some((id) => !id)) {
+      setError("Faltan jugadores en la alineación.");
+      return;
+    }
+    const posMap: Record<Position, number> = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+    team.starting.forEach((id, i) => {
+      const p = team.squad.find((pp) => pp.id === id);
+      const slot = slots[i];
+      if (p) posMap[slot] += 1;
+    });
+    if (posMap.GK < 1) {
+      setError("Falta el arquero en la alineación.");
+      return;
+    }
+    team.substitutionsLeft = settings.maxSubs;
+    // Guardar teams
+    setTeams([teams[0], teams[1]]);
+    // Siguiente pantalla: si hay otro humano por armar, handoff; si no, confirm
+    const other = teams[otherIdx];
+    if (other && !other.config.isBot && !(other as any)._armed) {
+      // marcar armado
+      (team as any)._armed = true;
+      setActiveLockerTeam(otherIdx as 0 | 1);
+      setScreen("handoff");
+      return;
+    }
+    (team as any)._armed = true;
+    // Si el otro es bot y no está armado, ir por handoff (auto arma bot); si ya está armado, confirm
+    if (other && other.config.isBot && !(other as any)._armed) {
+      setActiveLockerTeam(otherIdx as 0 | 1);
+      setScreen("handoff");
+    } else {
+      setScreen("confirm");
+    }
+  }
+
+  const starters = team.squad.filter((p) => team.starting.includes(p.id));
+  const bench = team.squad.filter((p) => !team.starting.includes(p.id));
+
+  return (
+    <div className="min-h-screen bg-background text-foreground pb-24">
+      <div className="max-w-4xl mx-auto px-4 py-6">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="h-5 w-5 rounded-full shrink-0" style={{ backgroundColor: team.config.color }} />
+            <h1 className="font-display text-2xl sm:text-3xl font-black truncate">{team.config.name} · Vestuario</h1>
+          </div>
+          <div className="text-xs text-muted-foreground">Promedio: {Math.round(starters.reduce((s, p) => s + p.overall, 0) / (starters.length || 1))}</div>
+        </div>
+
+        {/* Táctica */}
+        <div className="card p-4 mt-5">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <div className="label">Formación</div>
+              <select className="input mt-1 w-full" value={team.formation}
+                onChange={(e) => changeFormation(e.target.value as FormationName)}>
+                {FORMATION_LIST.map((f) => <option key={f}>{f}</option>)}
+              </select>
+            </div>
+            <div>
+              <div className="label">Estilo de juego</div>
+              <select className="input mt-1 w-full" value={team.style}
+                onChange={(e) => { team.style = e.target.value as Style; rerender(); }}>
+                <option>Ofensivo</option>
+                <option>Equilibrado</option>
+                <option>Defensivo</option>
+              </select>
+            </div>
+            <div>
+              <div className="label">Capitán</div>
+              <select className="input mt-1 w-full" value={team.captainId ?? ""}
+                onChange={(e) => { team.captainId = e.target.value; rerender(); }}>
+                {starters.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <div className="label">Pateador de penales</div>
+              <select className="input mt-1 w-full" value={team.penaltyTakerId ?? ""}
+                onChange={(e) => { team.penaltyTakerId = e.target.value; rerender(); }}>
+                {starters.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <div className="label">Pateador de córners / tiros libres</div>
+              <select className="input mt-1 w-full" value={team.setPieceTakerId ?? ""}
+                onChange={(e) => { team.setPieceTakerId = e.target.value; rerender(); }}>
+                {starters.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Cancha visual con slots */}
+        <div className="mt-5 rounded-2xl bg-pitch relative overflow-hidden border border-pitch/50"
+          style={{ minHeight: 420 }}>
+          <PitchLines />
+          <div className="relative z-10 grid grid-rows-4 h-[420px] p-3 gap-1">
+            {(["FWD", "MID", "DEF", "GK"] as Position[]).map((row) => (
+              <SlotRow key={row} team={team} slots={slots} rowPos={row} onSwap={swapSlot} />
+            ))}
+          </div>
+        </div>
+
+        {/* Suplentes */}
+        <div className="mt-6">
+          <h2 className="font-display font-bold text-lg">Suplentes ({bench.length})</h2>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {bench.map((p) => (
+              <div key={p.id} className="card px-3 py-2 flex items-center justify-between gap-2 text-sm">
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{p.name}</div>
+                  <div className="text-xs text-muted-foreground">{POSITION_LABEL[p.position]} · {p.age} años</div>
+                </div>
+                <div className="text-right">
+                  <div className="font-display font-black text-lg">{p.overall}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {error && <div className="mt-4 text-sm text-destructive-foreground bg-destructive rounded-md px-3 py-2">{error}</div>}
+      </div>
+
+      <div className="fixed bottom-0 inset-x-0 border-t bg-background/95 backdrop-blur px-4 py-3">
+        <div className="max-w-4xl mx-auto flex gap-3">
+          <button className="btn-secondary flex-1" onClick={() => { team.starting = autoLineup(team.squad, team.formation); rerender(); }}>
+            Auto-alineación
+          </button>
+          <button className="btn-primary flex-1" onClick={confirmTeam}>Confirmar equipo →</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SlotRow({ team, slots, rowPos, onSwap }: {
+  team: Team; slots: Position[]; rowPos: Position;
+  onSwap: (slotIndex: number, newPlayerId: string) => void;
+}) {
+  const indexes = slots.map((s, i) => (s === rowPos ? i : -1)).filter((i) => i >= 0);
+  return (
+    <div className="flex items-center justify-around gap-2">
+      {indexes.map((i) => (
+        <SlotChip key={i} team={team} slotIndex={i} onSwap={onSwap} slotPos={slots[i]} />
+      ))}
+    </div>
+  );
+}
+
+function SlotChip({ team, slotIndex, slotPos, onSwap }: {
+  team: Team; slotIndex: number; slotPos: Position;
+  onSwap: (slotIndex: number, newPlayerId: string) => void;
+}) {
+  const id = team.starting[slotIndex];
+  const p = team.squad.find((pp) => pp.id === id);
+  return (
+    <label className="relative flex flex-col items-center text-center max-w-[9rem]">
+      <span className="text-[10px] uppercase tracking-wider text-lime-200/80">{POSITION_SHORT[slotPos]}</span>
+      <select
+        value={id ?? ""}
+        onChange={(e) => onSwap(slotIndex, e.target.value)}
+        className="mt-1 w-full appearance-none rounded-lg bg-white/95 text-foreground text-xs sm:text-sm font-medium px-2 py-1.5 shadow-md focus:outline-none focus:ring-2 focus:ring-primary"
+      >
+        {team.squad.map((sp) => (
+          <option key={sp.id} value={sp.id}>
+            {sp.name} ({sp.overall} {POSITION_SHORT[sp.position]})
+          </option>
+        ))}
+      </select>
+      {p && (
+        <span className="mt-1 text-[10px] text-lime-100/70">
+          Físico {Math.round(p.physical)}
+        </span>
+      )}
+    </label>
+  );
+}
+
+function PitchLines() {
+  return (
+    <div className="absolute inset-0 pointer-events-none">
+      <div className="absolute inset-0 opacity-20 [background:repeating-linear-gradient(90deg,transparent_0_10%,rgba(255,255,255,0.06)_10%_20%)]" />
+      <div className="absolute inset-3 border border-white/30 rounded-lg" />
+      <div className="absolute left-1/2 top-3 bottom-3 border-l border-white/30" />
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 rounded-full border border-white/30" />
+    </div>
+  );
+}

@@ -1,24 +1,36 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { GameProvider, useGame } from "@/lib/football/store";
+import { HomeScreen, ManualScreen } from "@/components/football/HomeScreen";
+import { SetupScreen } from "@/components/football/SetupScreen";
+import { HandoffScreen } from "@/components/football/HandoffScreen";
+import { LockerScreen } from "@/components/football/LockerScreen";
+import { ConfirmScreen } from "@/components/football/ConfirmScreen";
+import { MatchScreen } from "@/components/football/MatchScreen";
+import { StatsScreen } from "@/components/football/StatsScreen";
 
-// No head() here: the home route inherits title/description/og/twitter from
-// __root.tsx, and ships no og:image so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
 export const Route = createFileRoute("/")({
   component: Index,
 });
 
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
 function Index() {
   return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
-    </div>
+    <GameProvider>
+      <Router />
+    </GameProvider>
   );
+}
+
+function Router() {
+  const { screen } = useGame();
+  switch (screen) {
+    case "home": return <HomeScreen />;
+    case "manual": return <ManualScreen />;
+    case "setup": return <SetupScreen />;
+    case "handoff": return <HandoffScreen />;
+    case "locker": return <LockerScreen />;
+    case "confirm": return <ConfirmScreen />;
+    case "match": return <MatchScreen />;
+    case "stats": return <StatsScreen />;
+    default: return <HomeScreen />;
+  }
 }
