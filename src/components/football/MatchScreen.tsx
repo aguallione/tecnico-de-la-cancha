@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/lib/football/store";
-import { initMatch, substitute, tickMinute, possessionPct, type MatchState } from "@/lib/football/engine";
+import { initMatch, substitute, tickMinute, possessionPct, outOfPositionFactor, type MatchState } from "@/lib/football/engine";
 import { autoLineup } from "@/lib/football/bot";
 import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
 import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
-import type { BuildUp, FormationName, LineHeight, PressIntensity, Style, Team } from "@/lib/football/types";
+import type { BuildUp, FormationName, LineHeight, Player, Position, PressIntensity, Style, Team } from "@/lib/football/types";
+
+const POSITION_SHORT: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
 
 // Emergency formation used when a player is sent off
 const EMERGENCY_FORMATION: FormationName = "5-3-2";
@@ -238,6 +240,84 @@ function RedCardDialog({ teamIdx, state, onClose }: {
   );
 }
 
+// ─── Reasignación manual de posiciones en vivo ───────────────────────────────
+
+function LiveSlotGrid({ team, onChange }: { team: Team; onChange: () => void }) {
+  const slots = slotsFor(team.formation);
+
+  function swapSlot(slotIndex: number, newPlayerId: string) {
+    const current = team.starting[slotIndex];
+    if (current === newPlayerId) return;
+    const otherSlot = team.starting.indexOf(newPlayerId);
+    if (otherSlot >= 0) {
+      // El jugador ya es titular: intercambiar slots
+      team.starting[otherSlot] = current;
+    }
+    team.starting[slotIndex] = newPlayerId;
+    // Actualizar fieldPosition y slotIndex en los jugadores afectados
+    for (const p of team.squad) {
+      const idx = team.starting.indexOf(p.id);
+      if (idx >= 0) {
+        p.onField = !p.redCarded;
+        p.fieldPosition = slots[idx] as Position;
+        p.slotIndex = idx;
+      }
+    }
+    onChange();
+  }
+
+  const rows: Position[] = ["FWD", "MID", "DEF", "GK"];
+  return (
+    <div className="rounded-xl bg-pitch overflow-hidden" style={{ minHeight: 220 }}>
+      <div className="relative grid grid-rows-4 h-[220px] p-2 gap-0.5">
+        {rows.map((rowPos) => {
+          const rowIndexes = slots.map((s, i) => (s === rowPos ? i : -1)).filter((i) => i >= 0);
+          if (rowIndexes.length === 0) return null;
+          return (
+            <div key={rowPos} className="flex items-center justify-around gap-1">
+              {rowIndexes.map((slotIdx) => {
+                const playerId = team.starting[slotIdx];
+                const player = team.squad.find((p) => p.id === playerId);
+                const slotPos = slots[slotIdx] as Position;
+                const factor = player ? outOfPositionFactor({ ...player, fieldPosition: slotPos }) : 1;
+                const oop = player && factor < 1;
+                const effective = player ? Math.round(player.overall * factor) : 0;
+                // Available players: all squad members not red-carded
+                const available = team.squad.filter((p) => !p.redCarded);
+                return (
+                  <label key={slotIdx} className="flex flex-col items-center text-center min-w-0 flex-1 max-w-[6rem]">
+                    <span className="text-[9px] uppercase tracking-wider text-lime-200/80">{POSITION_SHORT[slotPos]}</span>
+                    <select
+                      value={playerId ?? ""}
+                      onChange={(e) => swapSlot(slotIdx, e.target.value)}
+                      className="mt-0.5 w-full appearance-none rounded bg-white/90 text-foreground text-[10px] font-medium px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary truncate"
+                    >
+                      {available.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.overall} {POSITION_SHORT[p.position]})
+                        </option>
+                      ))}
+                    </select>
+                    {player && (
+                      <div className="text-[9px] text-lime-100/70 mt-0.5">
+                        {oop ? (
+                          <span className="text-red-400">{player.overall} → {effective}</span>
+                        ) : (
+                          <span>{player.overall}</span>
+                        )}
+                      </div>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function TacticsPanel({ teamIdx, state, onClose, onChange }: {
   teamIdx: 0 | 1; state: MatchState; onClose: () => void; onChange: () => void;
 }) {
@@ -283,6 +363,13 @@ function TacticsPanel({ teamIdx, state, onClose, onChange }: {
               }}>
               {FORMATION_LIST.map((f) => <option key={f}>{f}</option>)}
             </select>
+            {/* Reasignación manual de posiciones */}
+            <div className="mt-2">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
+                Reacomodar jugadores en posiciones
+              </div>
+              <LiveSlotGrid team={team} onChange={onChange} />
+            </div>
           </div>
 
           <div>

@@ -371,51 +371,63 @@ export function tickMinute(state: MatchState): MatchEvent[] {
   }
 
   // ─── Sugerencias de IA cada 15–20 minutos simulados ─────────────────────────
+  // Se generan sugerencias para AMBOS equipos (humanos y bots por igual),
+  // cada una identificada con el equipo al que corresponde, para que en modo
+  // 2 jugadores ambos reciban información relevante en el relato compartido.
   const insightInterval = 15 + Math.floor(rand() * 6); // 15–20 minutos
   if (state.minute - state.lastInsightMinute >= insightInterval && state.minute > 5 && !state.finished) {
     state.lastInsightMinute = state.minute;
     const [TA, TB] = state.teams;
     const [posA, posB] = possessionPct(state);
-    const insights: string[] = [];
 
-    // Posesión muy desequilibrada
-    if (posA >= 65) {
-      insights.push(`${TA.config.name} domina la posesión (${posA}%). El rival prácticamente no toca la pelota.`);
-    } else if (posB >= 65) {
-      insights.push(`${TB.config.name} tiene el control del juego con ${posB}% de posesión.`);
-    }
+    // Genera insights para un equipo concreto frente a su rival.
+    function insightsFor(team: Team, rival: Team, possession: number): string[] {
+      const results: string[] = [];
+      const prefix = team.config.name;
 
-    if (humanTeamIdx !== null) {
-      const humanTeam = state.teams[humanTeamIdx];
-      const rivalIdx = humanTeamIdx === 0 ? 1 : 0;
-      const rival = state.teams[rivalIdx];
+      // Posesión muy baja → sugerir salida más lenta
+      if (possession <= 35) {
+        results.push(`${prefix}: posesión muy baja (${possession}%). Considerá una salida más lenta para mantener la pelota.`);
+      }
+      // Posesión dominante
+      if (possession >= 65) {
+        results.push(`${prefix}: domina la posesión (${possession}%). Bien parado en el mediocampo.`);
+      }
 
-      // Jugador del equipo humano con stamina muy baja
-      const veryTired = humanTeam.squad
+      // Jugador con stamina crítica
+      const veryTired = team.squad
         .filter((p) => p.onField && !p.redCarded && p.stamina < 50)
         .sort((x, y) => x.stamina - y.stamina)[0];
       if (veryTired) {
-        insights.push(`${veryTired.name} lleva todo el partido y su nivel físico es crítico (${Math.round(veryTired.stamina)}%).`);
+        results.push(`${prefix}: ${veryTired.name} tiene el físico muy bajo (${Math.round(veryTired.stamina)}%). Considerá un cambio.`);
       }
 
-      // Eficacia del rival
+      // Eficacia del rival contra este equipo
       if (rival.shots > 0 && rival.shotsOnTarget / rival.shots > 0.55) {
-        insights.push(`El rival es muy eficaz: convierte ${rival.shotsOnTarget} de cada ${rival.shots} tiros en llegadas al arco. Ojo en defensa.`);
+        results.push(`${prefix}: el rival es muy eficaz (${rival.shotsOnTarget} tiros al arco de ${rival.shots}). Reforzá la defensa.`);
       }
 
       // Diferencia de xG marcada
-      if (humanTeam.xg > 0 && rival.xg > 0) {
-        if (rival.xg > humanTeam.xg * 1.6) {
-          insights.push(`El rival genera más peligro (xG ${rival.xg.toFixed(1)} vs ${humanTeam.xg.toFixed(1)} propio). Está siendo más efectivo.`);
-        } else if (humanTeam.xg > rival.xg * 1.6) {
-          insights.push(`Tu equipo genera más peligro (xG ${humanTeam.xg.toFixed(1)} vs ${rival.xg.toFixed(1)} del rival). Bien posicionados.`);
+      if (team.xg > 0 && rival.xg > 0) {
+        if (rival.xg > team.xg * 1.6) {
+          results.push(`${prefix}: el rival genera más peligro real (xG ${rival.xg.toFixed(1)} vs ${team.xg.toFixed(1)}). Está siendo más efectivo.`);
+        } else if (team.xg > rival.xg * 1.6) {
+          results.push(`${prefix}: generás más peligro que el rival (xG ${team.xg.toFixed(1)} vs ${rival.xg.toFixed(1)}). Bien posicionados.`);
         }
       }
+
+      return results;
     }
 
-    if (insights.length > 0) {
-      const text = insights[Math.floor(Math.random() * insights.length)];
-      newEvents.push(C.aiInsight(state.minute, text));
+    // Generar un insight para cada equipo (independientemente de si es bot o humano)
+    const insightsA = insightsFor(TA, TB, posA);
+    const insightsB = insightsFor(TB, TA, posB);
+
+    if (insightsA.length > 0) {
+      newEvents.push(C.aiInsight(state.minute, insightsA[Math.floor(Math.random() * insightsA.length)]));
+    }
+    if (insightsB.length > 0) {
+      newEvents.push(C.aiInsight(state.minute, insightsB[Math.floor(Math.random() * insightsB.length)]));
     }
   }
 
