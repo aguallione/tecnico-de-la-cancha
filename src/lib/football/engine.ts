@@ -1,5 +1,6 @@
 import type { MatchEvent, MatchSettings, MatchStats, Player, PlayerMatchStats, Position, Team } from "./types";
 import { formationMatchup, slotsFor } from "./formations";
+import { BUILDUP_TABLE, PRESS_TABLE, teamTacticalAdjustment } from "./tactics";
 import * as C from "./commentary";
 
 export interface MatchState {
@@ -16,6 +17,36 @@ export interface MatchState {
 
 function rand(): number { return Math.random(); }
 function pick<T>(a: T[]): T { return a[Math.floor(Math.random() * a.length)]; }
+
+/**
+ * Peso relativo de probabilidad de que un jugador remate/convierta un gol,
+ * según su posición EN CANCHA (no la natural). Refleja el fútbol real:
+ * delanteros > mediocampistas > defensores > arqueros.
+ * El arquero tiene un peso ínfimo (≈ penal de emergencia): prácticamente nunca convierte.
+ */
+function scorerWeight(fieldPos: Position | undefined): number {
+  switch (fieldPos) {
+    case "FWD": return 1.0;
+    case "MID": return 0.5;
+    case "DEF": return 0.12;
+    case "GK": return 0.005;
+    default: return 0.3;
+  }
+}
+
+/** Selección aleatoria ponderada. Devuelve undefined si la lista está vacía. */
+function weightedPick<T>(items: T[], weight: (t: T) => number): T | undefined {
+  if (items.length === 0) return undefined;
+  const weights = items.map((it) => Math.max(0, weight(it)));
+  const total = weights.reduce((s, w) => s + w, 0);
+  if (total <= 0) return items[Math.floor(Math.random() * items.length)];
+  let r = Math.random() * total;
+  for (let i = 0; i < items.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return items[i];
+  }
+  return items[items.length - 1];
+}
 
 /**
  * Penalización por jugar fuera de posición.
@@ -45,12 +76,61 @@ function teamStrength(team: Team): { attack: number; defense: number; overall: n
   if (onField.length === 0) return { attack: 40, defense: 40, overall: 40 };
   const staminaFactor = (p: Player) => 0.6 + 0.4 * (p.stamina / 100) * (p.injured ? 0.7 : 1);
   const posFactor = (p: Player) => outOfPositionFactor(p);
-  const atk = avg(onField.map((p) => p.attack * staminaFactor(p) * posFactor(p)));
-  const def = avg(onField.map((p) => p.defense * staminaFactor(p) * posFactor(p)));
-  const ov = avg(onField.map((p) => p.overall * staminaFactor(p) * posFactor(p)));
+  const eff = (p: Player) => staminaFactor(p) * posFactor(p);
+
+  // Nivel de Ataque: FWD + MID en cancha, usando su stat de ataque
+  const atkLine = onField.filter((p) => p.fieldPosition === "FWD" || p.fieldPosition === "MID");
+  // Nivel de Defensa: DEF + GK en cancha, usando su stat de defensa
+  const defLine = onField.filter((p) => p.fieldPosition === "DEF" || p.fieldPosition === "GK");
+
+  const atk = atkLine.length > 0
+    ? avg(atkLine.map((p) => p.attack * eff(p)))
+    : avg(onField.map((p) => p.attack * eff(p)));
+  const def = defLine.length > 0
+    ? avg(defLine.map((p) => p.defense * eff(p)))
+    : avg(onField.map((p) => p.defense * eff(p)));
+
+  const ov = avg(onField.map((p) => p.overall * eff(p)));
   // Penalización por hombres menos
   const numericPenalty = Math.max(0, 11 - onField.length) * 4;
-  return { attack: atk - numericPenalty, defense: def - numericPenalty, overall: ov - numericPenalty };
+  // Ajuste táctico: roles individuales + altura de línea (tabla configurable en tactics.ts).
+  const tac = teamTacticalAdjustment(team, onField);
+  return {
+    attack: atk - numericPenalty + tac.attack,
+    defense: def - numericPenalty + tac.defense,
+    overall: ov - numericPenalty,
+  };
+}
+
+/**
+ * Calcula Nivel de Ataque y Nivel de Defensa de un equipo antes del partido
+ * (para mostrar en la previa y el vestuario). Resuelve la posición de cancha a
+ * partir de los slots de la formación (no depende de que initMatch haya corrido)
+ * y aplica el mismo ajuste táctico que la simulación en vivo, para que la previa
+ * y el partido usen exactamente el mismo cálculo (sin sistemas paralelos).
+ */
+export function previewStrength(team: Team): { attack: number; defense: number } {
+  const formSlots = slotsFor(team.formation);
+  const starters = team.starting
+    .map((id, i) => {
+      const p = team.squad.find((pp) => pp.id === id);
+      return p ? { ...p, fieldPosition: formSlots[i] as Position } : null;
+    })
+    .filter(Boolean) as Player[];
+  if (starters.length === 0) return { attack: 50, defense: 50 };
+  const atkLine = starters.filter((p) => p.fieldPosition === "FWD" || p.fieldPosition === "MID");
+  const defLine = starters.filter((p) => p.fieldPosition === "DEF" || p.fieldPosition === "GK");
+  const baseAtk = atkLine.length > 0
+    ? avg(atkLine.map((p) => p.attack * outOfPositionFactor(p)))
+    : avg(starters.map((p) => p.attack * outOfPositionFactor(p)));
+  const baseDef = defLine.length > 0
+    ? avg(defLine.map((p) => p.defense * outOfPositionFactor(p)))
+    : avg(starters.map((p) => p.defense * outOfPositionFactor(p)));
+  const tac = teamTacticalAdjustment(team, starters);
+  return {
+    attack: Math.round(baseAtk + tac.attack),
+    defense: Math.round(baseDef + tac.defense),
+  };
 }
 
 function avg(a: number[]): number { return a.reduce((s, n) => s + n, 0) / a.length; }
@@ -129,11 +209,12 @@ export function tickMinute(state: MatchState): MatchEvent[] {
     newEvents.push(C.secondHalf());
   }
 
-  // Reducir stamina
+  // Reducir stamina — la presión alta cansa más rápido (tabla en tactics.ts)
   for (const t of state.teams) {
+    const drain = PRESS_TABLE[t.pressIntensity ?? "Media"].staminaDrain;
     for (const p of t.squad) {
       if (p.onField && !p.redCarded) {
-        p.stamina = Math.max(20, p.stamina - (0.5 + rand() * 0.8));
+        p.stamina = Math.max(20, p.stamina - (0.5 + rand() * 0.8) * drain);
       }
     }
   }
@@ -142,19 +223,27 @@ export function tickMinute(state: MatchState): MatchEvent[] {
   const sA = teamStrength(A);
   const sB = teamStrength(B);
   const matchup = formationMatchup(A.formation, B.formation); // positivo favorece A
-  const totalOverall = sA.overall + sB.overall || 1;
-  const posA = sA.overall / totalOverall;
 
-  // Posesión por minuto (aprox)
+  // Estilo de salida (build-up) e intensidad de presión (tablas en tactics.ts)
+  const buA = BUILDUP_TABLE[A.buildUp ?? "Equilibrado"];
+  const buB = BUILDUP_TABLE[B.buildUp ?? "Equilibrado"];
+  const pressA = PRESS_TABLE[A.pressIntensity ?? "Media"];
+  const pressB = PRESS_TABLE[B.pressIntensity ?? "Media"];
+
+  // Posesión: quien tiene mejor nivel general presiona más, sesgada por la salida.
+  const totalOverall = sA.overall + sB.overall || 1;
+  let posA = sA.overall / totalOverall;
+  posA += (buA.possession - buB.possession) / 200; // salida lenta => más posesión
+  posA = Math.max(0.15, Math.min(0.85, posA));
   if (rand() < posA) A.possession += 1; else B.possession += 1;
 
-  // Probabilidad de evento base
+  // Probabilidad de evento base — la presión alta genera más ocasiones.
   const eventRoll = rand();
-  // Ajuste por estilo (ambos)
   const styleTotal = (styleAttackMod(A.style) + styleAttackMod(B.style)) * 0.5;
+  const pressBonus = pressA.eventBonus + pressB.eventBonus;
 
-  if (eventRoll < 0.14 + styleTotal * 0.2) {
-    // Ocurre un evento ofensivo — decidir quién ataca
+  if (eventRoll < 0.14 + styleTotal * 0.2 + pressBonus) {
+    // Decidir quién ataca: ataque de A vs defensa de B (y viceversa)
     const attackerIsA = rand() < 0.5 + (sA.attack - sB.defense) / 400 + matchup;
     const attacker = attackerIsA ? A : B;
     const defender = attackerIsA ? B : A;
@@ -225,8 +314,15 @@ export function tickMinute(state: MatchState): MatchEvent[] {
 
 function handleAttack(state: MatchState, attacker: Team, defender: Team, atkIdx: 0 | 1, out: MatchEvent[]) {
   attacker.shots += 1;
-  const attackers = attacker.squad.filter((p) => p.onField && !p.redCarded && (p.position === "FWD" || p.position === "MID"));
-  const shooter = attackers.length ? pick(attackers) : pick(attacker.squad.filter((p) => p.onField && !p.redCarded));
+
+  // Rematador: se elige entre TODOS los jugadores de campo, ponderando por la
+  // posición EN CANCHA (fieldPosition) y su capacidad ofensiva. Un arquero (aunque
+  // sea un jugador de campo puesto al arco) tiene un peso ínfimo → casi nunca convierte.
+  const candidates = attacker.squad.filter((p) => p.onField && !p.redCarded);
+  const shooter = weightedPick(
+    candidates,
+    (p) => scorerWeight(p.fieldPosition) * (0.5 + (p.attack * outOfPositionFactor(p)) / 100),
+  );
   if (!shooter) return;
 
   const sA = teamStrength(attacker);
@@ -234,8 +330,12 @@ function handleAttack(state: MatchState, attacker: Team, defender: Team, atkIdx:
   const styleAtk = styleAttackMod(attacker.style);
   const styleDef = styleDefenseMod(defender.style);
   const shooterAtk = shooter.attack * outOfPositionFactor(shooter);
+  // Diferencial ataque-vs-defensa: la defensa rival pesa el doble que el nivel
+  // individual del rematador para que una defensa débil concierne más goles.
   const diff = (sA.attack + shooterAtk) / 2 - sD.defense;
-  const goalProb = Math.max(0.05, Math.min(0.55, 0.18 + diff / 220 + styleAtk * 0.1 - styleDef * 0.1));
+  // Estilo de salida del atacante: rápido = ataques más directos y arriesgados.
+  const buRisk = BUILDUP_TABLE[attacker.buildUp ?? "Equilibrado"].riskGoalProb;
+  const goalProb = Math.max(0.05, Math.min(0.6, 0.18 + diff / 170 + styleAtk * 0.1 - styleDef * 0.1 + buRisk));
   const onTargetProb = Math.max(0.2, Math.min(0.8, 0.35 + diff / 300));
 
   const roll = rand();
@@ -245,27 +345,40 @@ function handleAttack(state: MatchState, attacker: Team, defender: Team, atkIdx:
   const shooterStats = state.playerStats[shooter.id];
   if (shooterStats) shooterStats.shots += 1;
 
-  // Arquero defensor: su efectividad depende del out-of-position factor
+  // Arquero defensor: su efectividad depende del out-of-position factor.
   const gk = defender.squad.find((p) => p.onField && !p.redCarded && p.fieldPosition === "GK");
   const gkFactor = gk ? outOfPositionFactor(gk) : 0.65;
-  // Si el arquero está fuera de posición, más probabilidad de gol
-  const adjustedGoalProb = goalProb + (1 - gkFactor) * 0.15;
+  // Un arquero fuera de posición encaja más goles.
+  const adjustedGoalProb = Math.min(0.75, goalProb + (1 - gkFactor) * 0.25);
 
+  // shotsOnTarget representa SIEMPRE los tiros al arco que EJECUTÓ el equipo.
+  // Los "tiros al arco recibidos" del arquero se derivan del shotsOnTarget del rival,
+  // por lo que un tiro al arco solo se contabiliza en el atacante (nunca en el defensor).
+  // Invariante garantizada: para cada equipo,
+  //   shotsOnTarget(rival) === saves(equipo) + goles_recibidos(equipo)
+  // porque cada tiro al arco del rival termina en gol o en atajada de este arquero.
   if (roll < adjustedGoalProb) {
+    // Gol: cuenta como tiro al arco del atacante y gol del atacante.
     attacker.shotsOnTarget += 1;
     attacker.goals += 1;
     if (shooterStats) shooterStats.goals += 1;
     out.push(C.goal(state.minute, shooter.name, atkIdx, attacker.config.name));
   } else if (roll < adjustedGoalProb + onTargetProb * 0.5) {
+    // Tiro al arco. Con arquero en cancha → atajada; sin arquero (expulsado) → gol,
+    // para que la invariante shotsOnTarget = saves + goles_recibidos nunca se rompa.
     attacker.shotsOnTarget += 1;
-    // Atajada del arquero
     if (gk) {
       defender.saves += 1;
       const gkStats = state.playerStats[gk.id];
       if (gkStats) gkStats.saves += 1;
+      out.push(C.chance(state.minute, shooter.name, attacker.config.name));
+    } else {
+      attacker.goals += 1;
+      if (shooterStats) shooterStats.goals += 1;
+      out.push(C.goal(state.minute, shooter.name, atkIdx, attacker.config.name));
     }
-    out.push(C.chance(state.minute, shooter.name, attacker.config.name));
   } else {
+    // Tiro desviado: solo cuenta como tiro total, no al arco.
     out.push(C.chance(state.minute, shooter.name, attacker.config.name));
   }
 }

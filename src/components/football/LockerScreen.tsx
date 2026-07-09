@@ -3,7 +3,24 @@ import { useGame } from "@/lib/football/store";
 import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
 import { autoLineup } from "@/lib/football/bot";
 import { outOfPositionFactor } from "@/lib/football/engine";
-import type { FormationName, Player, Position, Style, Team } from "@/lib/football/types";
+import {
+  ROLE_TABLE,
+  rolesForPosition,
+  roleEffect,
+  LINE_HEIGHT_TABLE,
+  BUILDUP_TABLE,
+  PRESS_TABLE,
+} from "@/lib/football/tactics";
+import type {
+  BuildUp,
+  FormationName,
+  LineHeight,
+  Player,
+  Position,
+  PressIntensity,
+  Style,
+  Team,
+} from "@/lib/football/types";
 
 const POSITION_LABEL: Record<Position, string> = {
   GK: "Arquero",
@@ -149,6 +166,37 @@ export function LockerScreen() {
           </div>
         </div>
 
+        {/* Táctica avanzada */}
+        <div className="card p-4 mt-4">
+          <div className="label mb-1">Táctica avanzada</div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <div className="label">Altura de línea</div>
+              <select className="input mt-1 w-full" value={team.lineHeight}
+                onChange={(e) => { team.lineHeight = e.target.value as LineHeight; rerender(); }}>
+                {(Object.keys(LINE_HEIGHT_TABLE) as LineHeight[]).map((k) => <option key={k}>{k}</option>)}
+              </select>
+              <div className="mt-1 text-[11px] text-muted-foreground">{LINE_HEIGHT_TABLE[team.lineHeight].blurb}</div>
+            </div>
+            <div>
+              <div className="label">Salida (build-up)</div>
+              <select className="input mt-1 w-full" value={team.buildUp}
+                onChange={(e) => { team.buildUp = e.target.value as BuildUp; rerender(); }}>
+                {(Object.keys(BUILDUP_TABLE) as BuildUp[]).map((k) => <option key={k}>{k}</option>)}
+              </select>
+              <div className="mt-1 text-[11px] text-muted-foreground">{BUILDUP_TABLE[team.buildUp].blurb}</div>
+            </div>
+            <div>
+              <div className="label">Intensidad de presión</div>
+              <select className="input mt-1 w-full" value={team.pressIntensity}
+                onChange={(e) => { team.pressIntensity = e.target.value as PressIntensity; rerender(); }}>
+                {(Object.keys(PRESS_TABLE) as PressIntensity[]).map((k) => <option key={k}>{k}</option>)}
+              </select>
+              <div className="mt-1 text-[11px] text-muted-foreground">{PRESS_TABLE[team.pressIntensity].blurb}</div>
+            </div>
+          </div>
+        </div>
+
         {/* Cancha visual con slots */}
         <div className="mt-5 rounded-2xl bg-pitch relative overflow-hidden border border-pitch/50"
           style={{ minHeight: 420 }}>
@@ -185,6 +233,9 @@ export function LockerScreen() {
           );
         })()}
 
+        {/* Roles individuales */}
+        <IndividualRoles team={team} slots={slots} onChange={rerender} />
+
         {/* Suplentes */}
         <div className="mt-6">
           <h2 className="font-display font-bold text-lg">Suplentes ({bench.length})</h2>
@@ -213,6 +264,96 @@ export function LockerScreen() {
           </button>
           <button className="btn-primary flex-1" onClick={confirmTeam}>Confirmar equipo →</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function RoleEffectBadge({ role }: { role: string | undefined }) {
+  const eff = roleEffect(role);
+  if (!role || (eff.attack === 0 && eff.defense === 0)) {
+    return <span className="text-[11px] text-muted-foreground">Sin efecto</span>;
+  }
+  const fmt = (n: number) => (n > 0 ? `+${n}` : `${n}`);
+  return (
+    <span className="text-[11px] flex items-center gap-2">
+      <span className={eff.attack > 0 ? "text-green-500" : eff.attack < 0 ? "text-red-400" : "text-muted-foreground"}>
+        ATA {fmt(eff.attack)}
+      </span>
+      <span className={eff.defense > 0 ? "text-green-500" : eff.defense < 0 ? "text-red-400" : "text-muted-foreground"}>
+        DEF {fmt(eff.defense)}
+      </span>
+    </span>
+  );
+}
+
+function IndividualRoles({ team, slots, onChange }: {
+  team: Team; slots: Position[]; onChange: () => void;
+}) {
+  // Titulares en el orden de la alineación, con su posición EN CANCHA (slot).
+  const starters = team.starting
+    .map((id, i) => {
+      const p = team.squad.find((pp) => pp.id === id);
+      return p ? { p, fieldPos: slots[i] } : null;
+    })
+    .filter(Boolean) as Array<{ p: Player; fieldPos: Position }>;
+
+  return (
+    <div className="mt-6">
+      <h2 className="font-display font-bold text-lg">Roles individuales</h2>
+      <p className="text-xs text-muted-foreground mt-0.5">
+        Ajustan levemente el aporte de cada jugador al Nivel de Ataque o Defensa del equipo.
+      </p>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        {starters.map(({ p, fieldPos }) => {
+          const roles = rolesForPosition(fieldPos);
+          const groups = Array.from(
+            new Set(roles.map((r) => ROLE_TABLE[r].group ?? "")),
+          );
+          // El rol solo cuenta si corresponde a la posición de cancha actual.
+          const currentRole = roles.includes(p.individualRole || "") ? p.individualRole : "";
+          return (
+            <div key={p.id} className="card px-3 py-2 flex items-center justify-between gap-3 text-sm">
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">
+                  {p.name} <span className="text-xs text-muted-foreground">({POSITION_SHORT[fieldPos]})</span>
+                </div>
+                {roles.length > 0 ? (
+                  <select
+                    className="input mt-1 w-full text-xs"
+                    value={currentRole || ""}
+                    onChange={(e) => { p.individualRole = e.target.value; onChange(); }}
+                  >
+                    <option value="">Sin rol específico</option>
+                    {groups.map((g) =>
+                      g ? (
+                        <optgroup key={g} label={g}>
+                          {roles.filter((r) => ROLE_TABLE[r].group === g).map((r) => (
+                            <option key={r} value={r}>{r}</option>
+                          ))}
+                        </optgroup>
+                      ) : (
+                        roles.filter((r) => !ROLE_TABLE[r].group).map((r) => (
+                          <option key={r} value={r}>{r}</option>
+                        ))
+                      ),
+                    )}
+                  </select>
+                ) : (
+                  <div className="mt-1 text-xs text-muted-foreground">El arquero no tiene rol específico</div>
+                )}
+              </div>
+              <div className="text-right shrink-0">
+                <RoleEffectBadge role={currentRole || undefined} />
+                {currentRole && ROLE_TABLE[currentRole] && (
+                  <div className="text-[10px] text-muted-foreground mt-0.5 max-w-[8rem]">
+                    {ROLE_TABLE[currentRole].blurb}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

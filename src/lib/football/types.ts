@@ -1,6 +1,10 @@
 export type Position = "GK" | "DEF" | "MID" | "FWD";
 export type Style = "Ofensivo" | "Equilibrado" | "Defensivo";
 export type FormationName = "4-4-2" | "4-3-3" | "3-5-2" | "4-2-3-1" | "5-3-2" | "3-4-3";
+// Parámetros tácticos avanzados (ver src/lib/football/tactics.ts para sus efectos)
+export type LineHeight = "Baja" | "Media" | "Alta";
+export type BuildUp = "Lento" | "Equilibrado" | "Rápido";
+export type PressIntensity = "Baja" | "Media" | "Alta";
 
 export interface Player {
   id: string;
@@ -39,6 +43,10 @@ export interface Team {
   starting: string[]; // player ids, 11
   formation: FormationName;
   style: Style;
+  // Táctica avanzada
+  lineHeight: LineHeight;
+  buildUp: BuildUp;
+  pressIntensity: PressIntensity;
   penaltyTakerId?: string;
   setPieceTakerId?: string;
   captainId?: string;
