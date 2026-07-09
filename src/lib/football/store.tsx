@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import type { FormationName, MatchSettings, Player, Style, Team, TeamConfig } from "@/lib/football/types";
+import type { FormationName, MatchSettings, Player, PlayerMatchStats, Style, Team, TeamConfig } from "@/lib/football/types";
 import { generateSquad } from "@/lib/football/players";
 import { autoLineup } from "@/lib/football/bot";
 
@@ -11,7 +11,8 @@ export type Screen =
   | "locker"
   | "confirm"
   | "match"
-  | "stats";
+  | "stats"
+  | "test";
 
 export function makeTeam(config: TeamConfig): Team {
   const squad = generateSquad(20);
@@ -40,6 +41,7 @@ export function makeTeam(config: TeamConfig): Team {
     possession: 0,
     goals: 0,
     xg: 0,
+    saves: 0,
   };
 }
 
@@ -52,6 +54,10 @@ interface GameCtx {
   setSettings: (s: MatchSettings) => void;
   activeLockerTeam: 0 | 1;
   setActiveLockerTeam: (n: 0 | 1) => void;
+  testMode: boolean;
+  setTestMode: (v: boolean) => void;
+  lastMatchStats: Record<string, PlayerMatchStats>;
+  setLastMatchStats: (s: Record<string, PlayerMatchStats>) => void;
   reset: () => void;
 }
 
@@ -62,18 +68,24 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [teams, setTeams] = useState<[Team | null, Team | null]>([null, null]);
   const [settings, setSettings] = useState<MatchSettings>({ injuriesEnabled: true, maxSubs: 5, vsBot: true });
   const [activeLockerTeam, setActiveLockerTeam] = useState<0 | 1>(0);
+  const [testMode, setTestMode] = useState(false);
+  const [lastMatchStats, setLastMatchStats] = useState<Record<string, PlayerMatchStats>>({});
 
   const value = useMemo<GameCtx>(() => ({
     screen, setScreen,
     teams, setTeams,
     settings, setSettings,
     activeLockerTeam, setActiveLockerTeam,
+    testMode, setTestMode,
+    lastMatchStats, setLastMatchStats,
     reset: () => {
       setTeams([null, null]);
       setActiveLockerTeam(0);
+      setTestMode(false);
+      setLastMatchStats({});
       setScreen("home");
     },
-  }), [screen, teams, settings, activeLockerTeam]);
+  }), [screen, teams, settings, activeLockerTeam, testMode, lastMatchStats]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

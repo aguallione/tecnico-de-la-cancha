@@ -1,7 +1,7 @@
 import { useGame } from "@/lib/football/store";
 
 export function HomeScreen() {
-  const { setScreen, setSettings, settings } = useGame();
+  const { setScreen, setSettings, settings, setTestMode } = useGame();
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 py-10 bg-pitch text-pitch-foreground">
       <div className="max-w-lg w-full text-center">
@@ -16,16 +16,22 @@ export function HomeScreen() {
 
         <div className="mt-10 grid gap-3">
           <button
-            onClick={() => { setSettings({ ...settings, vsBot: true }); setScreen("setup"); }}
+            onClick={() => { setSettings({ ...settings, vsBot: true }); setTestMode(false); setScreen("setup"); }}
             className="btn-primary"
           >
             Nueva partida vs Bot
           </button>
           <button
-            onClick={() => { setSettings({ ...settings, vsBot: false }); setScreen("setup"); }}
+            onClick={() => { setSettings({ ...settings, vsBot: false }); setTestMode(false); setScreen("setup"); }}
             className="btn-secondary"
           >
             Nueva partida vs Amigo (mismo dispositivo)
+          </button>
+          <button
+            onClick={() => { setTestMode(true); setScreen("test"); }}
+            className="btn-ghost"
+          >
+            Modo de prueba (testing)
           </button>
           <button onClick={() => setScreen("manual")} className="btn-ghost">
             Manual de instrucciones
@@ -59,7 +65,10 @@ export function ManualScreen() {
             El partido corre solo con relato tipo ticker. Podés cambiar mentalidad, hacer sustituciones (5 por defecto), cambiar formación y ver cansancio en cualquier momento. No hay penales al empate.
           </Section>
           <Section title="Post-partido">
-            Ves estadísticas: posesión, tiros, tiros al arco, xG, córners, faltas, tarjetas y puntuación de equipo.
+            Ves estadísticas: posesión, tiros, tiros al arco, xG, córners, faltas, tarjetas, atajadas del arquero y valoraciones de jugadores (1-10).
+          </Section>
+          <Section title="Modo de prueba">
+            Permite armar dos equipos manualmente, jugador por jugador, y repetir el mismo partido varias veces para verificar el motor de simulación. Incluye valoraciones individuales y estadísticas de arquero para comprobar la penalización por fuera de posición.
           </Section>
         </div>
       </div>

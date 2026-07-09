@@ -7,6 +7,7 @@ import { LockerScreen } from "@/components/football/LockerScreen";
 import { ConfirmScreen } from "@/components/football/ConfirmScreen";
 import { MatchScreen } from "@/components/football/MatchScreen";
 import { StatsScreen } from "@/components/football/StatsScreen";
+import { TestScreen } from "@/components/football/TestScreen";
 
 export const Route = createFileRoute("/")({
   component: Index,
@@ -31,6 +32,7 @@ function Router() {
     case "confirm": return <ConfirmScreen />;
     case "match": return <MatchScreen />;
     case "stats": return <StatsScreen />;
+    case "test": return <TestScreen />;
     default: return <HomeScreen />;
   }
 }

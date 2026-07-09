@@ -1,4 +1,4 @@
-import type { MatchEvent, MatchSettings, Player, Position, Team } from "./types";
+import type { MatchEvent, MatchSettings, MatchStats, Player, PlayerMatchStats, Position, Team } from "./types";
 import { formationMatchup, slotsFor } from "./formations";
 import * as C from "./commentary";
 
@@ -11,6 +11,7 @@ export interface MatchState {
   events: MatchEvent[];
   teams: [Team, Team];
   settings: MatchSettings;
+  playerStats: Record<string, PlayerMatchStats>;
 }
 
 function rand(): number { return Math.random(); }
@@ -63,6 +64,7 @@ function styleDefenseMod(s: Team["style"]): number {
 
 export function initMatch(teams: [Team, Team], settings: MatchSettings): MatchState {
   // Marcar onField segun starting y asignar posición de cancha según slot
+  const playerStats: Record<string, PlayerMatchStats> = {};
   for (const t of teams) {
     const slots = slotsFor(t.formation);
     for (const p of t.squad) {
@@ -74,7 +76,27 @@ export function initMatch(teams: [Team, Team], settings: MatchSettings): MatchSt
       p.redCarded = false;
       p.yellowCards = 0;
       p.injured = false;
+      playerStats[p.id] = {
+        playerId: p.id,
+        goals: 0,
+        saves: 0,
+        shots: 0,
+        minutesPlayed: 0,
+        yellowCards: 0,
+        redCarded: false,
+      };
     }
+    t.saves = 0;
+    t.goals = 0;
+    t.shots = 0;
+    t.shotsOnTarget = 0;
+    t.corners = 0;
+    t.fouls = 0;
+    t.possession = 0;
+    t.xg = 0;
+    t.redCards = 0;
+    t.yellowCards = 0;
+    t.substitutionsLeft = settings.maxSubs;
   }
   return {
     minute: 0,
@@ -85,6 +107,7 @@ export function initMatch(teams: [Team, Team], settings: MatchSettings): MatchSt
     events: [C.kickoff()],
     teams,
     settings,
+    playerStats,
   };
 }
 
@@ -144,20 +167,24 @@ export function tickMinute(state: MatchState): MatchEvent[] {
     if (fouler) {
       newEvents.push(C.foulEv(state.minute, fouler.name));
       team.fouls += 1;
+      const fStats = state.playerStats[fouler.id];
       if (rand() < 0.18) {
         fouler.yellowCards += 1;
         team.yellowCards += 1;
+        if (fStats) fStats.yellowCards += 1;
         newEvents.push(C.yellow(state.minute, fouler.name));
         if (fouler.yellowCards >= 2) {
           fouler.redCarded = true;
           fouler.onField = false;
           team.redCards += 1;
+          if (fStats) fStats.redCarded = true;
           newEvents.push(C.red(state.minute, fouler.name, team.config.name));
         }
       } else if (rand() < 0.02) {
         fouler.redCarded = true;
         fouler.onField = false;
         team.redCards += 1;
+        if (fStats) fStats.redCarded = true;
         newEvents.push(C.red(state.minute, fouler.name, team.config.name));
       }
     }
@@ -215,12 +242,28 @@ function handleAttack(state: MatchState, attacker: Team, defender: Team, atkIdx:
   const xg = Math.max(0.02, Math.min(0.7, goalProb));
   attacker.xg += xg;
 
-  if (roll < goalProb) {
+  const shooterStats = state.playerStats[shooter.id];
+  if (shooterStats) shooterStats.shots += 1;
+
+  // Arquero defensor: su efectividad depende del out-of-position factor
+  const gk = defender.squad.find((p) => p.onField && !p.redCarded && p.fieldPosition === "GK");
+  const gkFactor = gk ? outOfPositionFactor(gk) : 0.65;
+  // Si el arquero está fuera de posición, más probabilidad de gol
+  const adjustedGoalProb = goalProb + (1 - gkFactor) * 0.15;
+
+  if (roll < adjustedGoalProb) {
     attacker.shotsOnTarget += 1;
     attacker.goals += 1;
+    if (shooterStats) shooterStats.goals += 1;
     out.push(C.goal(state.minute, shooter.name, atkIdx, attacker.config.name));
-  } else if (roll < goalProb + onTargetProb * 0.5) {
+  } else if (roll < adjustedGoalProb + onTargetProb * 0.5) {
     attacker.shotsOnTarget += 1;
+    // Atajada del arquero
+    if (gk) {
+      defender.saves += 1;
+      const gkStats = state.playerStats[gk.id];
+      if (gkStats) gkStats.saves += 1;
+    }
     out.push(C.chance(state.minute, shooter.name, attacker.config.name));
   } else {
     out.push(C.chance(state.minute, shooter.name, attacker.config.name));
@@ -258,4 +301,38 @@ export function teamRating(team: Team): number {
   const onField = team.squad.filter((p) => team.starting.includes(p.id));
   if (!onField.length) return 0;
   return Math.round(avg(onField.map((p) => p.overall)));
+}
+
+/**
+ * Calcula la valoración (1-10 con un decimal) de cada jugador tras el partido.
+ * - Base: 5.0
+ * - Goles: +1.0 c/u (máx +3)
+ * - Atajadas: +0.3 c/u (máx +2.5)
+ * - Tiros sin gol: -0.1 c/u (máx -0.5)
+ * - Tarjeta amarilla: -0.3
+   * - Roja: -1.0
+ * - Penalización por fuera de posición: hasta -1.5 según factor
+ */
+export function computePlayerRating(
+  player: Player,
+  stats: PlayerMatchStats | undefined,
+): number {
+  if (!stats) return 5.0;
+  let r = 5.0;
+  r += Math.min(3, stats.goals * 1.0);
+  r += Math.min(2.5, stats.saves * 0.3);
+  r -= Math.min(0.5, Math.max(0, stats.shots - stats.goals) * 0.1);
+  r -= stats.yellowCards * 0.3;
+  if (stats.redCarded) r -= 1.0;
+  // Penalización por fuera de posición
+  const factor = outOfPositionFactor(player);
+  if (factor < 1) r -= (1 - factor) * 2.5;
+  return Math.max(1, Math.min(10, Math.round(r * 10) / 10));
+}
+
+export function computeTeamRating(team: Team, playerStats: Record<string, PlayerMatchStats>): number {
+  const starters = team.squad.filter((p) => team.starting.includes(p.id));
+  if (!starters.length) return 0;
+  const ratings = starters.map((p) => computePlayerRating(p, playerStats[p.id]));
+  return Math.round((ratings.reduce((s, n) => s + n, 0) / ratings.length) * 10) / 10;
 }

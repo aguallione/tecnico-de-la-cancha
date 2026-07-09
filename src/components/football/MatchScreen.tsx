@@ -8,7 +8,7 @@ import type { FormationName, Style, Team } from "@/lib/football/types";
 const TICK_MS = 900;
 
 export function MatchScreen() {
-  const { setScreen, teams, settings } = useGame();
+  const { setScreen, teams, settings, setLastMatchStats } = useGame();
   const [a, b] = teams;
   const stateRef = useRef<MatchState | null>(null);
   const [, force] = useState(0);
@@ -46,6 +46,7 @@ export function MatchScreen() {
       }
       rerender();
       if (s.finished) {
+        setLastMatchStats(s.playerStats);
         setTimeout(() => setScreen("stats"), 1500);
       }
     }, TICK_MS / speed);

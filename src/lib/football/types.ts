@@ -52,6 +52,21 @@ export interface Team {
   possession: number; // ticks
   goals: number;
   xg: number;
+  saves: number; // atajadas del arquero
+}
+
+export interface PlayerMatchStats {
+  playerId: string;
+  goals: number;
+  saves: number;
+  shots: number;
+  minutesPlayed: number;
+  yellowCards: number;
+  redCarded: boolean;
+}
+
+export interface MatchStats {
+  players: Record<string, PlayerMatchStats>;
 }
 
 export interface MatchEvent {

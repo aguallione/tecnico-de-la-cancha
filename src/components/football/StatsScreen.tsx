@@ -1,8 +1,10 @@
 import { useGame } from "@/lib/football/store";
-import type { Team } from "@/lib/football/types";
+import { outOfPositionFactor, computePlayerRating, computeTeamRating } from "@/lib/football/engine";
+import { slotsFor } from "@/lib/football/formations";
+import type { Team, PlayerMatchStats } from "@/lib/football/types";
 
 export function StatsScreen() {
-  const { teams, reset } = useGame();
+  const { teams, reset, testMode, setScreen, setTeams, lastMatchStats } = useGame();
   const [a, b] = teams;
   if (!a || !b) return null;
 
@@ -15,12 +17,21 @@ export function StatsScreen() {
     ["Tiros totales", a.shots, b.shots],
     ["Tiros al arco", a.shotsOnTarget, b.shotsOnTarget],
     ["Goles esperados (xG)", a.xg.toFixed(2), b.xg.toFixed(2)],
+    ["Atajadas", a.saves, b.saves],
     ["Córners", a.corners, b.corners],
     ["Faltas", a.fouls, b.fouls],
     ["Amarillas", a.yellowCards, b.yellowCards],
     ["Rojas", a.redCards, b.redCards],
-    ["Puntaje del equipo", teamRating(a), teamRating(b)],
   ];
+
+  function repeatMatch() {
+    setScreen("match");
+  }
+
+  function newTestMatch() {
+    setTeams([null, null]);
+    setScreen("test");
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground px-4 py-8">
@@ -46,11 +57,34 @@ export function StatsScreen() {
                 <div className="text-left font-display tabular-nums">{vb}</div>
               </div>
             ))}
+            <div className="grid grid-cols-3 items-center gap-2 text-sm pt-2 border-t">
+              <div className="text-right font-display tabular-nums">{computeTeamRating(a, lastMatchStats)}</div>
+              <div className="text-center text-xs uppercase tracking-wider text-muted-foreground">Valoración del equipo</div>
+              <div className="text-left font-display tabular-nums">{computeTeamRating(b, lastMatchStats)}</div>
+            </div>
           </div>
         </div>
 
+        {/* Arqueros */}
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          <GKCard team={a} />
+          <GKCard team={b} />
+        </div>
+
+        {/* Valoraciones por jugador */}
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          <PlayerRatings team={a} stats={lastMatchStats} />
+          <PlayerRatings team={b} stats={lastMatchStats} />
+        </div>
+
         <div className="mt-6 flex gap-3">
-          <button className="btn-primary flex-1" onClick={reset}>Nueva partida</button>
+          {testMode ? (
+            <>
+              <button className="btn-secondary flex-1" onClick={newTestMatch}>Nuevo test</button>
+              <button className="btn-primary flex-1" onClick={repeatMatch}>Repetir partido</button>
+            </>
+          ) : null}
+          <button className="btn-ghost flex-1" onClick={reset}>{testMode ? "Salir" : "Nueva partida"}</button>
         </div>
       </div>
     </div>
@@ -69,8 +103,79 @@ function TeamCol({ team, align }: { team: Team; align: "left" | "right" }) {
   );
 }
 
-function teamRating(team: Team): number {
-  const s = team.squad.filter((p) => team.starting.includes(p.id));
-  if (!s.length) return 0;
-  return Math.round(s.reduce((a, p) => a + p.overall, 0) / s.length);
+function GKCard({ team }: { team: Team }) {
+  const gk = team.squad.find((p) => p.fieldPosition === "GK" && team.starting.includes(p.id));
+  if (!gk) return null;
+  const factor = outOfPositionFactor(gk);
+  const effective = Math.round(gk.overall * factor);
+  const oop = factor < 1;
+  const saves = team.saves;
+  return (
+    <div className="card p-4">
+      <h3 className="font-display font-bold text-sm text-muted-foreground uppercase tracking-wider">Arquero</h3>
+      <div className="mt-2 flex items-center justify-between">
+        <div>
+          <div className="font-display font-bold">{gk.name}</div>
+          <div className="text-xs text-muted-foreground">
+            {gk.position === "GK" ? "Arquero natural" : `Juega de ${gk.position} · FUERA DE POSICIÓN`}
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-muted-foreground">Puntaje base → efectivo</div>
+          <div className="font-display font-black text-lg">
+            {gk.overall}
+            {oop && <span className="text-red-500"> → {effective}</span>}
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+        <div className="rounded-lg bg-muted/50 px-3 py-2">
+          <div className="text-xs text-muted-foreground">Atajadas</div>
+          <div className="font-display font-bold text-xl">{saves}</div>
+        </div>
+        <div className="rounded-lg bg-muted/50 px-3 py-2">
+          <div className="text-xs text-muted-foreground">Tiros al arco recibidos</div>
+          <div className="font-display font-bold text-xl">{team.shotsOnTarget}</div>
+        </div>
+      </div>
+      {oop && (
+        <div className="mt-2 text-xs text-red-400">
+          Penalización aplicada: -{Math.round((1 - factor) * 100)}% por jugar fuera de posición
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlayerRatings({ team, stats }: { team: Team; stats: Record<string, PlayerMatchStats> }) {
+  const starters = team.squad.filter((p) => team.starting.includes(p.id));
+  const slots = slotsFor(team.formation);
+  return (
+    <div className="card p-4">
+      <h3 className="font-display font-bold text-sm text-muted-foreground uppercase tracking-wider">
+        {team.config.name} · Valoraciones
+      </h3>
+      <div className="mt-3 space-y-1.5">
+        {starters.map((p, i) => {
+          const ps = stats[p.id];
+          const rating = computePlayerRating(p, ps);
+          const factor = outOfPositionFactor({ ...p, fieldPosition: slots[i] });
+          const oop = factor < 1;
+          return (
+            <div key={p.id} className="flex items-center gap-2 text-sm">
+              <span className="flex-1 truncate">
+                {p.name}
+                {oop && <span className="text-xs text-red-400 ml-1">({p.position}→{slots[i]})</span>}
+              </span>
+              {ps?.goals ? <span className="text-xs text-green-500">⚽{ps.goals}</span> : null}
+              {ps?.saves ? <span className="text-xs text-blue-500">🧤{ps.saves}</span> : null}
+              <span className={`font-display font-bold tabular-nums w-10 text-right ${rating >= 7 ? "text-green-500" : rating < 5 ? "text-red-400" : ""}`}>
+                {rating.toFixed(1)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
