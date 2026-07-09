@@ -19,19 +19,24 @@ function pick<T>(a: T[]): T { return a[Math.floor(Math.random() * a.length)]; }
 /**
  * Penalización por jugar fuera de posición.
  * Devuelve un multiplicador (0..1) que se aplica a los atributos efectivos.
- * Mismas posiciones o adyacentes (DEF-MID, MID-FWD) no se penalizan;
- * saltos grandes (GK vs campo, DEF vs FWD) penalizan fuerte.
+ *
+ * - Cualquier jugador de campo puesto de arquero: -35% (atajar es una
+ *   habilidad totalmente distinta).
+ * - Arquero puesto de campo: -35% (mismo motivo, inverso).
+ * - Puestos de campo vecinos (DEF↔MID, MID↔FWD): -12% (roles parecidos).
+ * - Puestos de campo extremos (DEF↔FWD): -25% (roles muy distintos).
  */
 export function outOfPositionFactor(player: Player): number {
   if (!player.fieldPosition || player.fieldPosition === player.position) return 1;
-  const order: Position[] = ["GK", "DEF", "MID", "FWD"];
-  const nat = order.indexOf(player.position);
-  const field = order.indexOf(player.fieldPosition);
-  const dist = Math.abs(nat - field);
-  if (dist === 0) return 1;
-  if (dist === 1) return 0.92; // adyacente: leve
-  if (dist === 2) return 0.7;  // dos saltos: notable
-  return 0.5; // tres saltos (GK<->FWD): muy fuerte
+  const nat = player.position;
+  const field = player.fieldPosition;
+  // Arquero vs campo: siempre penalización máxima
+  if (nat === "GK" || field === "GK") return 0.65;
+  // Puestos de campo: por distancia en la línea DEF-MID-FWD
+  const order: Position[] = ["DEF", "MID", "FWD"];
+  const dist = Math.abs(order.indexOf(nat) - order.indexOf(field));
+  if (dist === 1) return 0.88; // vecinos
+  return 0.75; // dist === 2: extremos
 }
 
 function teamStrength(team: Team): { attack: number; defense: number; overall: number } {
