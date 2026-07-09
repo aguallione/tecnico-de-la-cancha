@@ -45,12 +45,42 @@ function teamStrength(team: Team): { attack: number; defense: number; overall: n
   if (onField.length === 0) return { attack: 40, defense: 40, overall: 40 };
   const staminaFactor = (p: Player) => 0.6 + 0.4 * (p.stamina / 100) * (p.injured ? 0.7 : 1);
   const posFactor = (p: Player) => outOfPositionFactor(p);
-  const atk = avg(onField.map((p) => p.attack * staminaFactor(p) * posFactor(p)));
-  const def = avg(onField.map((p) => p.defense * staminaFactor(p) * posFactor(p)));
-  const ov = avg(onField.map((p) => p.overall * staminaFactor(p) * posFactor(p)));
+  const eff = (p: Player) => staminaFactor(p) * posFactor(p);
+
+  // Nivel de Ataque: FWD + MID en cancha, usando su stat de ataque
+  const atkLine = onField.filter((p) => p.fieldPosition === "FWD" || p.fieldPosition === "MID");
+  // Nivel de Defensa: DEF + GK en cancha, usando su stat de defensa
+  const defLine = onField.filter((p) => p.fieldPosition === "DEF" || p.fieldPosition === "GK");
+
+  const atk = atkLine.length > 0
+    ? avg(atkLine.map((p) => p.attack * eff(p)))
+    : avg(onField.map((p) => p.attack * eff(p)));
+  const def = defLine.length > 0
+    ? avg(defLine.map((p) => p.defense * eff(p)))
+    : avg(onField.map((p) => p.defense * eff(p)));
+
+  const ov = avg(onField.map((p) => p.overall * eff(p)));
   // Penalización por hombres menos
   const numericPenalty = Math.max(0, 11 - onField.length) * 4;
   return { attack: atk - numericPenalty, defense: def - numericPenalty, overall: ov - numericPenalty };
+}
+
+/**
+ * Calcula Nivel de Ataque y Nivel de Defensa de un equipo antes del partido
+ * (para mostrar en la previa). Usa la lista de starters sin estado de stamina/lesión.
+ */
+export function previewStrength(team: Team): { attack: number; defense: number } {
+  const slots = team.starting.map((id) => team.squad.find((p) => p.id === id)).filter(Boolean) as Player[];
+  if (slots.length === 0) return { attack: 50, defense: 50 };
+  const atkLine = slots.filter((p) => p.fieldPosition === "FWD" || p.fieldPosition === "MID");
+  const defLine = slots.filter((p) => p.fieldPosition === "DEF" || p.fieldPosition === "GK");
+  const atk = atkLine.length > 0
+    ? Math.round(avg(atkLine.map((p) => p.attack * outOfPositionFactor(p))))
+    : Math.round(avg(slots.map((p) => p.attack * outOfPositionFactor(p))));
+  const def = defLine.length > 0
+    ? Math.round(avg(defLine.map((p) => p.defense * outOfPositionFactor(p))))
+    : Math.round(avg(slots.map((p) => p.defense * outOfPositionFactor(p))));
+  return { attack: atk, defense: def };
 }
 
 function avg(a: number[]): number { return a.reduce((s, n) => s + n, 0) / a.length; }
@@ -142,19 +172,18 @@ export function tickMinute(state: MatchState): MatchEvent[] {
   const sA = teamStrength(A);
   const sB = teamStrength(B);
   const matchup = formationMatchup(A.formation, B.formation); // positivo favorece A
+
+  // Posesión: quien tiene mejor ataque general presiona más
   const totalOverall = sA.overall + sB.overall || 1;
   const posA = sA.overall / totalOverall;
-
-  // Posesión por minuto (aprox)
   if (rand() < posA) A.possession += 1; else B.possession += 1;
 
   // Probabilidad de evento base
   const eventRoll = rand();
-  // Ajuste por estilo (ambos)
   const styleTotal = (styleAttackMod(A.style) + styleAttackMod(B.style)) * 0.5;
 
   if (eventRoll < 0.14 + styleTotal * 0.2) {
-    // Ocurre un evento ofensivo — decidir quién ataca
+    // Decidir quién ataca: ataque de A vs defensa de B (y viceversa)
     const attackerIsA = rand() < 0.5 + (sA.attack - sB.defense) / 400 + matchup;
     const attacker = attackerIsA ? A : B;
     const defender = attackerIsA ? B : A;
@@ -252,13 +281,17 @@ function handleAttack(state: MatchState, attacker: Team, defender: Team, atkIdx:
   const adjustedGoalProb = goalProb + (1 - gkFactor) * 0.15;
 
   if (roll < adjustedGoalProb) {
+    // Tiro al arco que entra: se contabiliza como "tiro al arco" del atacante
+    // Y como "tiro al arco recibido" del defensor
     attacker.shotsOnTarget += 1;
+    defender.shotsOnTarget += 1;
     attacker.goals += 1;
     if (shooterStats) shooterStats.goals += 1;
     out.push(C.goal(state.minute, shooter.name, atkIdx, attacker.config.name));
   } else if (roll < adjustedGoalProb + onTargetProb * 0.5) {
+    // Tiro al arco atajado: se contabiliza en ambos lados + atajada del arquero
     attacker.shotsOnTarget += 1;
-    // Atajada del arquero
+    defender.shotsOnTarget += 1;
     if (gk) {
       defender.saves += 1;
       const gkStats = state.playerStats[gk.id];
@@ -266,6 +299,7 @@ function handleAttack(state: MatchState, attacker: Team, defender: Team, atkIdx:
     }
     out.push(C.chance(state.minute, shooter.name, attacker.config.name));
   } else {
+    // Tiro desviado: solo cuenta como tiro total, no al arco
     out.push(C.chance(state.minute, shooter.name, attacker.config.name));
   }
 }
