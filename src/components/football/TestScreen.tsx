@@ -3,7 +3,8 @@ import { useGame, makeTeam } from "@/lib/football/store";
 import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
 import { autoLineup } from "@/lib/football/bot";
 import { outOfPositionFactor } from "@/lib/football/engine";
-import type { FormationName, Player, Position, Team } from "@/lib/football/types";
+import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
+import type { BuildUp, FormationName, LineHeight, Player, Position, PressIntensity, Team } from "@/lib/football/types";
 
 const POSITION_SHORT: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
 
@@ -62,8 +63,8 @@ export function TestScreen() {
         </p>
 
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
-          <TeamSetup team={teamA} label="Equipo A" onSwap={(i, id) => swap(0, i, id)} onFormation={(f) => changeFormation(0, f)} />
-          <TeamSetup team={teamB} label="Equipo B" onSwap={(i, id) => swap(1, i, id)} onFormation={(f) => changeFormation(1, f)} />
+          <TeamSetup team={teamA} label="Equipo A" onSwap={(i, id) => swap(0, i, id)} onFormation={(f) => changeFormation(0, f)} onChange={rerender} />
+          <TeamSetup team={teamB} label="Equipo B" onSwap={(i, id) => swap(1, i, id)} onFormation={(f) => changeFormation(1, f)} onChange={rerender} />
         </div>
 
         <div className="mt-8 flex gap-3">
@@ -74,11 +75,12 @@ export function TestScreen() {
   );
 }
 
-function TeamSetup({ team, label, onSwap, onFormation }: {
+function TeamSetup({ team, label, onSwap, onFormation, onChange }: {
   team: Team;
   label: string;
   onSwap: (slotIndex: number, newPlayerId: string) => void;
   onFormation: (f: FormationName) => void;
+  onChange: () => void;
 }) {
   const slots = slotsFor(team.formation);
   const starters = team.squad.filter((p) => team.starting.includes(p.id));
@@ -101,6 +103,55 @@ function TeamSetup({ team, label, onSwap, onFormation }: {
       >
         {FORMATION_LIST.map((f) => <option key={f} value={f}>{f}</option>)}
       </select>
+
+      {/* Táctica avanzada */}
+      <div className="mt-3 space-y-2">
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Altura de línea</div>
+          <div className="grid grid-cols-3 gap-1">
+            {(Object.keys(LINE_HEIGHT_TABLE) as LineHeight[]).map((k) => (
+              <button
+                key={k}
+                className={`chip text-xs py-1 ${team.lineHeight === k ? "chip-active" : ""}`}
+                onClick={() => { team.lineHeight = k; onChange(); }}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
+          <div className="mt-0.5 text-[10px] text-muted-foreground">{LINE_HEIGHT_TABLE[team.lineHeight].blurb}</div>
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Salida (build-up)</div>
+          <div className="grid grid-cols-3 gap-1">
+            {(Object.keys(BUILDUP_TABLE) as BuildUp[]).map((k) => (
+              <button
+                key={k}
+                className={`chip text-xs py-1 ${team.buildUp === k ? "chip-active" : ""}`}
+                onClick={() => { team.buildUp = k; onChange(); }}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
+          <div className="mt-0.5 text-[10px] text-muted-foreground">{BUILDUP_TABLE[team.buildUp].blurb}</div>
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Intensidad de presión</div>
+          <div className="grid grid-cols-3 gap-1">
+            {(Object.keys(PRESS_TABLE) as PressIntensity[]).map((k) => (
+              <button
+                key={k}
+                className={`chip text-xs py-1 ${team.pressIntensity === k ? "chip-active" : ""}`}
+                onClick={() => { team.pressIntensity = k; onChange(); }}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
+          <div className="mt-0.5 text-[10px] text-muted-foreground">{PRESS_TABLE[team.pressIntensity].blurb}</div>
+        </div>
+      </div>
 
       <div className="mt-3 space-y-1.5">
         {slots.map((slotPos, i) => {

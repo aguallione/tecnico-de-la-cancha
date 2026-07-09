@@ -108,7 +108,10 @@ function TeamHeader({ team, align, onOpen, isHuman }: { team: Team; align: "left
       {align === "left" && <span className="h-4 w-4 rounded-full shrink-0" style={{ backgroundColor: team.config.color }} />}
       <div className={`min-w-0 ${align === "right" ? "text-right" : "text-left"}`}>
         <div className="font-display font-black text-sm sm:text-base truncate">{team.config.name}</div>
-        <div className="text-[10px] uppercase tracking-wider text-lime-200/70">{team.formation} · {team.style}{isHuman ? " · Tocá para tácticas" : ""}</div>
+        <div className="text-[10px] uppercase tracking-wider text-lime-200/70">
+          {team.formation} · {team.style} · L:{team.lineHeight.charAt(0)} S:{team.buildUp.charAt(0)} P:{team.pressIntensity.charAt(0)}
+          {isHuman ? " · Tocá" : ""}
+        </div>
       </div>
       {align === "right" && <span className="h-4 w-4 rounded-full shrink-0" style={{ backgroundColor: team.config.color }} />}
     </button>
@@ -195,27 +198,54 @@ function TacticsPanel({ teamIdx, state, onClose, onChange }: {
 
           <div>
             <div className="label">Táctica avanzada</div>
-            <div className="mt-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="mt-2 space-y-3">
+              {/* Altura de línea */}
               <div>
-                <div className="text-[11px] text-muted-foreground">Altura de línea</div>
-                <select className="input mt-1 w-full text-sm" value={team.lineHeight}
-                  onChange={(e) => { team.lineHeight = e.target.value as LineHeight; onChange(); }}>
-                  {(Object.keys(LINE_HEIGHT_TABLE) as LineHeight[]).map((k) => <option key={k}>{k}</option>)}
-                </select>
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Altura de línea</div>
+                <div className="grid grid-cols-3 gap-1">
+                  {(Object.keys(LINE_HEIGHT_TABLE) as LineHeight[]).map((k) => (
+                    <button
+                      key={k}
+                      className={`chip text-xs py-1.5 ${team.lineHeight === k ? "chip-active" : ""}`}
+                      onClick={() => { team.lineHeight = k; onChange(); }}
+                    >
+                      {k}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-1 text-[11px] text-muted-foreground">{LINE_HEIGHT_TABLE[team.lineHeight].blurb}</div>
               </div>
+              {/* Salida (build-up) */}
               <div>
-                <div className="text-[11px] text-muted-foreground">Salida</div>
-                <select className="input mt-1 w-full text-sm" value={team.buildUp}
-                  onChange={(e) => { team.buildUp = e.target.value as BuildUp; onChange(); }}>
-                  {(Object.keys(BUILDUP_TABLE) as BuildUp[]).map((k) => <option key={k}>{k}</option>)}
-                </select>
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Salida (build-up)</div>
+                <div className="grid grid-cols-3 gap-1">
+                  {(Object.keys(BUILDUP_TABLE) as BuildUp[]).map((k) => (
+                    <button
+                      key={k}
+                      className={`chip text-xs py-1.5 ${team.buildUp === k ? "chip-active" : ""}`}
+                      onClick={() => { team.buildUp = k; onChange(); }}
+                    >
+                      {k}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-1 text-[11px] text-muted-foreground">{BUILDUP_TABLE[team.buildUp].blurb}</div>
               </div>
+              {/* Intensidad de presión */}
               <div>
-                <div className="text-[11px] text-muted-foreground">Presión</div>
-                <select className="input mt-1 w-full text-sm" value={team.pressIntensity}
-                  onChange={(e) => { team.pressIntensity = e.target.value as PressIntensity; onChange(); }}>
-                  {(Object.keys(PRESS_TABLE) as PressIntensity[]).map((k) => <option key={k}>{k}</option>)}
-                </select>
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Intensidad de presión</div>
+                <div className="grid grid-cols-3 gap-1">
+                  {(Object.keys(PRESS_TABLE) as PressIntensity[]).map((k) => (
+                    <button
+                      key={k}
+                      className={`chip text-xs py-1.5 ${team.pressIntensity === k ? "chip-active" : ""}`}
+                      onClick={() => { team.pressIntensity = k; onChange(); }}
+                    >
+                      {k}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-1 text-[11px] text-muted-foreground">{PRESS_TABLE[team.pressIntensity].blurb}</div>
               </div>
             </div>
           </div>
