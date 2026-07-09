@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useGame } from "@/lib/football/store";
 import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
 import { autoLineup } from "@/lib/football/bot";
+import { outOfPositionFactor } from "@/lib/football/engine";
 import type { FormationName, Player, Position, Style, Team } from "@/lib/football/types";
 
 const POSITION_LABEL: Record<Position, string> = {
@@ -11,6 +12,7 @@ const POSITION_LABEL: Record<Position, string> = {
   FWD: "Delantero",
 };
 const POSITION_SHORT: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
+const avg = (a: number[]) => (a.length ? a.reduce((s, n) => s + n, 0) / a.length : 0);
 
 export function LockerScreen() {
   const { setScreen, teams, activeLockerTeam, setActiveLockerTeam, settings, setTeams } = useGame();
@@ -158,6 +160,31 @@ export function LockerScreen() {
           </div>
         </div>
 
+        {/* Resumen fuera de posición */}
+        {(() => {
+          const starters = team.starting.map((pid, i) => ({
+            p: team.squad.find((pp) => pp.id === pid),
+            pos: slots[i],
+          })).filter((s) => s.p);
+          const oopList = starters.filter((s) => s.p!.position !== s.pos);
+          if (oopList.length === 0) return null;
+          const baseAvg = Math.round(avg(starters.map((s) => s.p!.overall)));
+          const effAvg = Math.round(avg(starters.map((s) => s.p!.overall * outOfPositionFactor({ ...s.p!, fieldPosition: s.pos }))));
+          return (
+            <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-red-300">
+                <span>⚠ {oopList.length} jugador{oopList.length > 1 ? "es" : ""} fuera de posición</span>
+                <span className="text-muted-foreground">·</span>
+                <span>Promedio base: <b className="text-foreground">{baseAvg}</b></span>
+                <span className="text-red-400">→ Efectivo: <b>{effAvg}</b></span>
+              </div>
+              <div className="mt-1 text-xs text-red-200/70">
+                {oopList.map((s) => `${s.p!.name} (${POSITION_SHORT[s.p!.position]}→${POSITION_SHORT[s.pos]})`).join(" · ")}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Suplentes */}
         <div className="mt-6">
           <h2 className="font-display font-bold text-lg">Suplentes ({bench.length})</h2>
@@ -211,6 +238,9 @@ function SlotChip({ team, slotIndex, slotPos, onSwap }: {
 }) {
   const id = team.starting[slotIndex];
   const p = team.squad.find((pp) => pp.id === id);
+  const factor = p ? outOfPositionFactor({ ...p, fieldPosition: slotPos }) : 1;
+  const oop = p && factor < 1;
+  const effective = p ? Math.round(p.overall * factor) : 0;
   return (
     <label className="relative flex flex-col items-center text-center max-w-[9rem]">
       <span className="text-[10px] uppercase tracking-wider text-lime-200/80">{POSITION_SHORT[slotPos]}</span>
@@ -226,9 +256,17 @@ function SlotChip({ team, slotIndex, slotPos, onSwap }: {
         ))}
       </select>
       {p && (
-        <span className="mt-1 text-[10px] text-lime-100/70">
-          Físico {Math.round(p.physical)}
-        </span>
+        <div className="mt-1 flex items-center gap-1">
+          <span className="text-[10px] text-lime-100/70">
+            Físico {Math.round(p.physical)}
+          </span>
+          <span className="text-[10px] font-bold text-lime-100/90">{p.overall}</span>
+          {oop && (
+            <span className="text-[10px] font-bold text-red-400" title={`Fuera de posición: ${POSITION_LABEL[p.position]} jugando de ${POSITION_LABEL[slotPos]}`}>
+              → {effective}
+            </span>
+          )}
+        </div>
       )}
     </label>
   );

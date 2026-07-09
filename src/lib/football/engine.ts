@@ -22,7 +22,7 @@ function pick<T>(a: T[]): T { return a[Math.floor(Math.random() * a.length)]; }
  * Mismas posiciones o adyacentes (DEF-MID, MID-FWD) no se penalizan;
  * saltos grandes (GK vs campo, DEF vs FWD) penalizan fuerte.
  */
-function outOfPositionFactor(player: Player): number {
+export function outOfPositionFactor(player: Player): number {
   if (!player.fieldPosition || player.fieldPosition === player.position) return 1;
   const order: Position[] = ["GK", "DEF", "MID", "FWD"];
   const nat = order.indexOf(player.position);
