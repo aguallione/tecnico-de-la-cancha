@@ -1,6 +1,5 @@
 import { useGame } from "@/lib/football/store";
 import { outOfPositionFactor, computePlayerRating, computeTeamRating } from "@/lib/football/engine";
-import { slotsFor } from "@/lib/football/formations";
 import type { Team, PlayerMatchStats } from "@/lib/football/types";
 
 export function StatsScreen() {
@@ -148,24 +147,32 @@ function GKCard({ team }: { team: Team }) {
 }
 
 function PlayerRatings({ team, stats }: { team: Team; stats: Record<string, PlayerMatchStats> }) {
-  const starters = team.squad.filter((p) => team.starting.includes(p.id));
-  const slots = slotsFor(team.formation);
+  // Preserve the starting order defined in team.starting so index-based slot lookups are consistent,
+  // but we no longer use slots at all — p.fieldPosition is the single source of truth set by initMatch.
+  const starters = team.starting
+    .map((id) => team.squad.find((p) => p.id === id))
+    .filter(Boolean) as typeof team.squad;
   return (
     <div className="card p-4">
       <h3 className="font-display font-bold text-sm text-muted-foreground uppercase tracking-wider">
         {team.config.name} · Valoraciones
       </h3>
       <div className="mt-3 space-y-1.5">
-        {starters.map((p, i) => {
+        {starters.map((p) => {
           const ps = stats[p.id];
           const rating = computePlayerRating(p, ps);
-          const factor = outOfPositionFactor({ ...p, fieldPosition: slots[i] });
+          // Use the field position that was actually assigned in the locker screen / initMatch.
+          const factor = outOfPositionFactor(p);
           const oop = factor < 1;
           return (
             <div key={p.id} className="flex items-center gap-2 text-sm">
               <span className="flex-1 truncate">
                 {p.name}
-                {oop && <span className="text-xs text-red-400 ml-1">({p.position}→{slots[i]})</span>}
+                {oop && (
+                  <span className="text-xs text-red-400 ml-1">
+                    ({p.position}→{p.fieldPosition})
+                  </span>
+                )}
               </span>
               {ps?.goals ? <span className="text-xs text-green-500">⚽{ps.goals}</span> : null}
               {ps?.saves ? <span className="text-xs text-blue-500">🧤{ps.saves}</span> : null}
