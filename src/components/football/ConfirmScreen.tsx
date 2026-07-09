@@ -1,38 +1,13 @@
 import { useGame } from "@/lib/football/store";
-import { slotsFor } from "@/lib/football/formations";
-import { outOfPositionFactor } from "@/lib/football/engine";
-import type { Team, Position } from "@/lib/football/types";
-
-function teamStrengthPreview(team: Team): { attack: number; defense: number } {
-  const slots = slotsFor(team.formation);
-  const starters = team.starting.map((id, i) => {
-    const p = team.squad.find((pp) => pp.id === id);
-    return p ? { player: p, fieldPos: slots[i] as Position } : null;
-  }).filter(Boolean) as Array<{ player: Team["squad"][number]; fieldPos: Position }>;
-
-  const eff = (p: Team["squad"][number], fp: Position) =>
-    p.overall * outOfPositionFactor({ ...p, fieldPosition: fp });
-
-  const atkLine = starters.filter((s) => s.fieldPos === "FWD" || s.fieldPos === "MID");
-  const defLine = starters.filter((s) => s.fieldPos === "DEF" || s.fieldPos === "GK");
-
-  const avgArr = (arr: typeof starters, stat: "attack" | "defense") =>
-    arr.length > 0
-      ? Math.round(arr.reduce((sum, s) => sum + s.player[stat] * outOfPositionFactor({ ...s.player, fieldPosition: s.fieldPos }), 0) / arr.length)
-      : 50;
-
-  return {
-    attack: avgArr(atkLine, "attack"),
-    defense: avgArr(defLine, "defense"),
-  };
-}
+import { previewStrength } from "@/lib/football/engine";
+import type { Team } from "@/lib/football/types";
 
 export function ConfirmScreen() {
   const { setScreen, teams, settings } = useGame();
   const [a, b] = teams;
   if (!a || !b) return null;
-  const strengthA = teamStrengthPreview(a);
-  const strengthB = teamStrengthPreview(b);
+  const strengthA = previewStrength(a);
+  const strengthB = previewStrength(b);
 
   return (
     <div className="min-h-screen bg-background text-foreground px-4 py-8">
@@ -78,6 +53,9 @@ function TeamPreview({
         <div className="min-w-0">
           <div className="font-display font-black text-xl truncate">{team.config.name}</div>
           <div className="text-xs text-muted-foreground">{team.formation} · {team.style}</div>
+          <div className="text-[11px] text-muted-foreground mt-0.5">
+            Línea {team.lineHeight} · Salida {team.buildUp} · Presión {team.pressIntensity}
+          </div>
         </div>
       </div>
       <div className={`mt-4 grid grid-cols-2 gap-3 ${isRight ? "sm:text-right" : "sm:text-left"}`}>

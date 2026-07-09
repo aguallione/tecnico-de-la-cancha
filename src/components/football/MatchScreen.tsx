@@ -3,7 +3,8 @@ import { useGame } from "@/lib/football/store";
 import { initMatch, substitute, tickMinute, possessionPct, type MatchState } from "@/lib/football/engine";
 import { autoLineup } from "@/lib/football/bot";
 import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
-import type { FormationName, Style, Team } from "@/lib/football/types";
+import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
+import type { BuildUp, FormationName, LineHeight, PressIntensity, Style, Team } from "@/lib/football/types";
 
 const TICK_MS = 900;
 
@@ -190,6 +191,33 @@ function TacticsPanel({ teamIdx, state, onClose, onChange }: {
               }}>
               {FORMATION_LIST.map((f) => <option key={f}>{f}</option>)}
             </select>
+          </div>
+
+          <div>
+            <div className="label">Táctica avanzada</div>
+            <div className="mt-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div>
+                <div className="text-[11px] text-muted-foreground">Altura de línea</div>
+                <select className="input mt-1 w-full text-sm" value={team.lineHeight}
+                  onChange={(e) => { team.lineHeight = e.target.value as LineHeight; onChange(); }}>
+                  {(Object.keys(LINE_HEIGHT_TABLE) as LineHeight[]).map((k) => <option key={k}>{k}</option>)}
+                </select>
+              </div>
+              <div>
+                <div className="text-[11px] text-muted-foreground">Salida</div>
+                <select className="input mt-1 w-full text-sm" value={team.buildUp}
+                  onChange={(e) => { team.buildUp = e.target.value as BuildUp; onChange(); }}>
+                  {(Object.keys(BUILDUP_TABLE) as BuildUp[]).map((k) => <option key={k}>{k}</option>)}
+                </select>
+              </div>
+              <div>
+                <div className="text-[11px] text-muted-foreground">Presión</div>
+                <select className="input mt-1 w-full text-sm" value={team.pressIntensity}
+                  onChange={(e) => { team.pressIntensity = e.target.value as PressIntensity; onChange(); }}>
+                  {(Object.keys(PRESS_TABLE) as PressIntensity[]).map((k) => <option key={k}>{k}</option>)}
+                </select>
+              </div>
+            </div>
           </div>
 
           <div>
