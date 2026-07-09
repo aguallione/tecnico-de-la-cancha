@@ -178,7 +178,13 @@ function TacticsPanel({ teamIdx, state, onClose, onChange }: {
               onChange={(e) => {
                 team.formation = e.target.value as FormationName;
                 team.starting = autoLineup(team.squad.filter((p) => !p.redCarded), team.formation);
-                for (const p of team.squad) p.onField = team.starting.includes(p.id) && !p.redCarded;
+                const slots = slotsFor(team.formation);
+                for (const p of team.squad) {
+                  const idx = team.starting.indexOf(p.id);
+                  p.onField = idx >= 0 && !p.redCarded;
+                  p.fieldPosition = idx >= 0 ? slots[idx] : undefined;
+                  p.slotIndex = idx >= 0 ? idx : undefined;
+                }
                 onChange();
               }}>
               {FORMATION_LIST.map((f) => <option key={f}>{f}</option>)}

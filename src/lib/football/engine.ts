@@ -1,5 +1,5 @@
-import type { MatchEvent, MatchSettings, Player, Team } from "./types";
-import { formationMatchup } from "./formations";
+import type { MatchEvent, MatchSettings, Player, Position, Team } from "./types";
+import { formationMatchup, slotsFor } from "./formations";
 import * as C from "./commentary";
 
 export interface MatchState {
@@ -16,13 +16,32 @@ export interface MatchState {
 function rand(): number { return Math.random(); }
 function pick<T>(a: T[]): T { return a[Math.floor(Math.random() * a.length)]; }
 
+/**
+ * Penalización por jugar fuera de posición.
+ * Devuelve un multiplicador (0..1) que se aplica a los atributos efectivos.
+ * Mismas posiciones o adyacentes (DEF-MID, MID-FWD) no se penalizan;
+ * saltos grandes (GK vs campo, DEF vs FWD) penalizan fuerte.
+ */
+function outOfPositionFactor(player: Player): number {
+  if (!player.fieldPosition || player.fieldPosition === player.position) return 1;
+  const order: Position[] = ["GK", "DEF", "MID", "FWD"];
+  const nat = order.indexOf(player.position);
+  const field = order.indexOf(player.fieldPosition);
+  const dist = Math.abs(nat - field);
+  if (dist === 0) return 1;
+  if (dist === 1) return 0.92; // adyacente: leve
+  if (dist === 2) return 0.7;  // dos saltos: notable
+  return 0.5; // tres saltos (GK<->FWD): muy fuerte
+}
+
 function teamStrength(team: Team): { attack: number; defense: number; overall: number } {
   const onField = team.squad.filter((p) => p.onField && !p.redCarded);
   if (onField.length === 0) return { attack: 40, defense: 40, overall: 40 };
   const staminaFactor = (p: Player) => 0.6 + 0.4 * (p.stamina / 100) * (p.injured ? 0.7 : 1);
-  const atk = avg(onField.map((p) => p.attack * staminaFactor(p)));
-  const def = avg(onField.map((p) => p.defense * staminaFactor(p)));
-  const ov = avg(onField.map((p) => p.overall * staminaFactor(p)));
+  const posFactor = (p: Player) => outOfPositionFactor(p);
+  const atk = avg(onField.map((p) => p.attack * staminaFactor(p) * posFactor(p)));
+  const def = avg(onField.map((p) => p.defense * staminaFactor(p) * posFactor(p)));
+  const ov = avg(onField.map((p) => p.overall * staminaFactor(p) * posFactor(p)));
   // Penalización por hombres menos
   const numericPenalty = Math.max(0, 11 - onField.length) * 4;
   return { attack: atk - numericPenalty, defense: def - numericPenalty, overall: ov - numericPenalty };
@@ -38,10 +57,14 @@ function styleDefenseMod(s: Team["style"]): number {
 }
 
 export function initMatch(teams: [Team, Team], settings: MatchSettings): MatchState {
-  // Marcar onField segun starting
+  // Marcar onField segun starting y asignar posición de cancha según slot
   for (const t of teams) {
+    const slots = slotsFor(t.formation);
     for (const p of t.squad) {
-      p.onField = t.starting.includes(p.id);
+      const slotIdx = t.starting.indexOf(p.id);
+      p.onField = slotIdx >= 0;
+      p.fieldPosition = slotIdx >= 0 ? slots[slotIdx] : undefined;
+      p.slotIndex = slotIdx >= 0 ? slotIdx : undefined;
       p.stamina = 100;
       p.redCarded = false;
       p.yellowCards = 0;
@@ -178,7 +201,8 @@ function handleAttack(state: MatchState, attacker: Team, defender: Team, atkIdx:
   const sD = teamStrength(defender);
   const styleAtk = styleAttackMod(attacker.style);
   const styleDef = styleDefenseMod(defender.style);
-  const diff = (sA.attack + shooter.attack) / 2 - sD.defense;
+  const shooterAtk = shooter.attack * outOfPositionFactor(shooter);
+  const diff = (sA.attack + shooterAtk) / 2 - sD.defense;
   const goalProb = Math.max(0.05, Math.min(0.55, 0.18 + diff / 220 + styleAtk * 0.1 - styleDef * 0.1));
   const onTargetProb = Math.max(0.2, Math.min(0.8, 0.35 + diff / 300));
 
@@ -208,6 +232,10 @@ export function substitute(state: MatchState, teamIdx: 0 | 1, outId: string, inI
   outP.onField = false;
   inP.onField = true;
   inP.stamina = 100;
+  inP.fieldPosition = outP.fieldPosition;
+  inP.slotIndex = outP.slotIndex;
+  outP.fieldPosition = undefined;
+  outP.slotIndex = undefined;
   team.substitutionsLeft -= 1;
   const ev = C.subEv(state.minute, outP.name, inP.name, team.config.name);
   state.events.push(ev);
