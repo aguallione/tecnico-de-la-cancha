@@ -71,9 +71,58 @@ export function SetupScreen() {
           </div>
         </div>
 
+        <div className="card p-4 mt-4">
+          <h3 className="font-display text-lg font-bold">Automatizaciones</h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            Reglas que se ejecutan automáticamente durante la simulación. Todas desactivadas por defecto.
+          </p>
+          <div className="mt-3 space-y-4 text-sm">
+            <AutomationToggle
+              checked={settings.automations?.closingDown ?? false}
+              onChange={(v) => setSettings({ ...settings, automations: { ...(settings.automations ?? { exploitRedCard: false, staminaAlert: false }), closingDown: v } })}
+              label="Cerrar el partido"
+              description="Si ganás por 1 gol después del minuto 75, baja automáticamente la línea a Baja y la mentalidad a Defensivo."
+            />
+            <AutomationToggle
+              checked={settings.automations?.exploitRedCard ?? false}
+              onChange={(v) => setSettings({ ...settings, automations: { ...(settings.automations ?? { closingDown: false, staminaAlert: false }), exploitRedCard: v } })}
+              label="Explotar inferioridad rival"
+              description="Si el rival queda con un jugador expulsado, sube automáticamente la línea a Alta."
+            />
+            <AutomationToggle
+              checked={settings.automations?.staminaAlert ?? false}
+              onChange={(v) => setSettings({ ...settings, automations: { ...(settings.automations ?? { closingDown: false, exploitRedCard: false }), staminaAlert: v } })}
+              label="Alerta de cansancio"
+              description="Cuando un jugador propio baja del 60 % de energía, aparece una notificación en el relato sugiriendo el cambio."
+            />
+          </div>
+        </div>
+
         <button className="btn-primary mt-6 w-full" onClick={start}>Continuar al vestuario →</button>
       </div>
     </div>
+  );
+}
+
+function AutomationToggle({ checked, onChange, label, description }: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  description: string;
+}) {
+  return (
+    <label className="flex items-start gap-3 cursor-pointer">
+      <input
+        type="checkbox"
+        className="mt-0.5 shrink-0"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <div>
+        <div className="font-medium">{label}</div>
+        <div className="text-xs text-muted-foreground mt-0.5">{description}</div>
+      </div>
+    </label>
   );
 }
 

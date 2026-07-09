@@ -129,3 +129,43 @@ export function tickComment(minute: number): MatchEvent {
     ]),
   };
 }
+
+// ─── Eventos de automatización táctica ───────────────────────────────────────
+
+export function autoClosingDown(minute: number, teamName: string): MatchEvent {
+  return {
+    minute,
+    kind: "info",
+    text: pick([
+      `[AUTO] ${teamName} baja la línea y se pone defensivo. Hay que cuidar el resultado.`,
+      `[AUTO] El equipo ajusta su posicionamiento: línea baja y mentalidad defensiva en ${teamName}.`,
+      `[AUTO] Con la ventaja ajustada, ${teamName} cierra líneas y protege el arco. Orden táctico.`,
+    ]),
+  };
+}
+
+export function autoExploitRed(minute: number, teamName: string): MatchEvent {
+  return {
+    minute,
+    kind: "info",
+    text: pick([
+      `[AUTO] ${teamName} sube la línea tras la expulsión rival. Hay que aprovecharlo.`,
+      `[AUTO] El equipo ajusta su posicionamiento tras la expulsión. ${teamName} presiona más arriba.`,
+      `[AUTO] Con un hombre menos el rival, ${teamName} adelanta la defensa para asfixiarlo.`,
+    ]),
+  };
+}
+
+export function autoStaminaAlert(minute: number, playerName: string, teamName: string): MatchEvent {
+  return {
+    minute,
+    kind: "info",
+    text: `[AVISO] ${playerName} (${teamName}) está bajando el rendimiento físico. Considerá un cambio.`,
+  };
+}
+
+// ─── Eventos de sugerencias de IA (solo informativos) ────────────────────────
+
+export function aiInsight(minute: number, text: string): MatchEvent {
+  return { minute, kind: "insight" as MatchEvent["kind"], text: `[DT IA] ${text}` };
+}

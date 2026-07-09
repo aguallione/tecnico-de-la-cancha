@@ -13,6 +13,16 @@ export interface MatchState {
   teams: [Team, Team];
   settings: MatchSettings;
   playerStats: Record<string, PlayerMatchStats>;
+  /** Set to the team index (0|1) when a red card just happened and the UI should pause for a dialog. */
+  redCardPausePending: (0 | 1) | null;
+  /** Tracks which player ids have already triggered a stamina alert (to fire only once). */
+  staminaAlertFired: Set<string>;
+  /** Tracks which automation "closingDown" already fired (per team). */
+  closingDownFired: [boolean, boolean];
+  /** Tracks which automation "exploitRedCard" already fired (per team). */
+  exploitRedFired: [boolean, boolean];
+  /** Tracks at which minutes AI insights were last emitted. */
+  lastInsightMinute: number;
 }
 
 function rand(): number { return Math.random(); }
@@ -188,6 +198,11 @@ export function initMatch(teams: [Team, Team], settings: MatchSettings): MatchSt
     teams,
     settings,
     playerStats,
+    redCardPausePending: null,
+    staminaAlertFired: new Set<string>(),
+    closingDownFired: [false, false],
+    exploitRedFired: [false, false],
+    lastInsightMinute: 0,
   };
 }
 
@@ -293,6 +308,115 @@ export function tickMinute(state: MatchState): MatchEvent[] {
     }
   } else if (state.minute % 7 === 0) {
     newEvents.push(C.tickComment(state.minute));
+  }
+
+  // ─── Automatizaciones tácticas ──────────────────────────────────────────────
+  const auto = state.settings.automations;
+  const rawHumanIdx = state.teams.findIndex((t) => !t.config.isBot);
+  const humanTeamIdx: (0 | 1) | null = rawHumanIdx === 0 ? 0 : rawHumanIdx === 1 ? 1 : null;
+
+  if (auto && humanTeamIdx !== null) {
+    const humanTeam = state.teams[humanTeamIdx];
+    const rivalIdx = humanTeamIdx === 0 ? 1 : 0;
+    const rivalTeam = state.teams[rivalIdx];
+
+    // Rule 1: Ganando por 1 después del min 75 → lineHeight Baja + style Defensivo
+    if (auto.closingDown && !state.closingDownFired[humanTeamIdx] && state.minute > 75) {
+      const lead = humanTeam.goals - rivalTeam.goals;
+      if (lead === 1) {
+        humanTeam.lineHeight = "Baja";
+        humanTeam.style = "Defensivo";
+        state.closingDownFired[humanTeamIdx] = true;
+        newEvents.push(C.autoClosingDown(state.minute, humanTeam.config.name));
+      }
+    }
+
+    // Rule 2: Rival queda con un jugador expulsado → lineHeight Alta
+    if (auto.exploitRedCard && !state.exploitRedFired[humanTeamIdx]) {
+      const rivalReds = rivalTeam.squad.filter((p) => p.redCarded).length;
+      if (rivalReds >= 1) {
+        humanTeam.lineHeight = "Alta";
+        state.exploitRedFired[humanTeamIdx] = true;
+        newEvents.push(C.autoExploitRed(state.minute, humanTeam.config.name));
+      }
+    }
+
+    // Rule 3: Jugador propio con stamina < 60 → notificación (solo una vez por jugador)
+    if (auto.staminaAlert) {
+      const tired = humanTeam.squad.find(
+        (p) => p.onField && !p.redCarded && p.stamina < 60 && !state.staminaAlertFired.has(p.id),
+      );
+      if (tired) {
+        state.staminaAlertFired.add(tired.id);
+        newEvents.push(C.autoStaminaAlert(state.minute, tired.name, humanTeam.config.name));
+      }
+    }
+  }
+
+  // ─── Señal de pausa para expulsión del equipo humano (modo interactivo) ─────
+  if (state.redCardPausePending === null && humanTeamIdx !== null) {
+    const redThisTick = newEvents.find((ev) => ev.kind === "card" && ev.text.includes("ROJA"));
+    if (redThisTick) {
+      const humanTeam = state.teams[humanTeamIdx];
+      const humanHadRed = humanTeam.squad.some(
+        (p) => p.redCarded && !state.staminaAlertFired.has("__red_checked_" + p.id),
+      );
+      if (humanHadRed) {
+        for (const p of humanTeam.squad) {
+          if (p.redCarded) state.staminaAlertFired.add("__red_checked_" + p.id);
+        }
+        state.redCardPausePending = humanTeamIdx;
+      }
+    }
+  }
+
+  // ─── Sugerencias de IA cada 15–20 minutos simulados ─────────────────────────
+  const insightInterval = 15 + Math.floor(rand() * 6); // 15–20 minutos
+  if (state.minute - state.lastInsightMinute >= insightInterval && state.minute > 5 && !state.finished) {
+    state.lastInsightMinute = state.minute;
+    const [TA, TB] = state.teams;
+    const [posA, posB] = possessionPct(state);
+    const insights: string[] = [];
+
+    // Posesión muy desequilibrada
+    if (posA >= 65) {
+      insights.push(`${TA.config.name} domina la posesión (${posA}%). El rival prácticamente no toca la pelota.`);
+    } else if (posB >= 65) {
+      insights.push(`${TB.config.name} tiene el control del juego con ${posB}% de posesión.`);
+    }
+
+    if (humanTeamIdx !== null) {
+      const humanTeam = state.teams[humanTeamIdx];
+      const rivalIdx = humanTeamIdx === 0 ? 1 : 0;
+      const rival = state.teams[rivalIdx];
+
+      // Jugador del equipo humano con stamina muy baja
+      const veryTired = humanTeam.squad
+        .filter((p) => p.onField && !p.redCarded && p.stamina < 50)
+        .sort((x, y) => x.stamina - y.stamina)[0];
+      if (veryTired) {
+        insights.push(`${veryTired.name} lleva todo el partido y su nivel físico es crítico (${Math.round(veryTired.stamina)}%).`);
+      }
+
+      // Eficacia del rival
+      if (rival.shots > 0 && rival.shotsOnTarget / rival.shots > 0.55) {
+        insights.push(`El rival es muy eficaz: convierte ${rival.shotsOnTarget} de cada ${rival.shots} tiros en llegadas al arco. Ojo en defensa.`);
+      }
+
+      // Diferencia de xG marcada
+      if (humanTeam.xg > 0 && rival.xg > 0) {
+        if (rival.xg > humanTeam.xg * 1.6) {
+          insights.push(`El rival genera más peligro (xG ${rival.xg.toFixed(1)} vs ${humanTeam.xg.toFixed(1)} propio). Está siendo más efectivo.`);
+        } else if (humanTeam.xg > rival.xg * 1.6) {
+          insights.push(`Tu equipo genera más peligro (xG ${humanTeam.xg.toFixed(1)} vs ${rival.xg.toFixed(1)} del rival). Bien posicionados.`);
+        }
+      }
+    }
+
+    if (insights.length > 0) {
+      const text = insights[Math.floor(Math.random() * insights.length)];
+      newEvents.push(C.aiInsight(state.minute, text));
+    }
   }
 
   // Final

@@ -6,6 +6,9 @@ import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
 import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
 import type { BuildUp, FormationName, LineHeight, PressIntensity, Style, Team } from "@/lib/football/types";
 
+// Emergency formation used when a player is sent off
+const EMERGENCY_FORMATION: FormationName = "5-3-2";
+
 const TICK_MS = 900;
 
 export function MatchScreen() {
@@ -23,6 +26,8 @@ export function MatchScreen() {
     stateRef.current = initMatch([a, b], settings);
     rerender();
   }, [a, b, settings]);
+
+  const [redCardDialog, setRedCardDialog] = useState<{ teamIdx: 0 | 1 } | null>(null);
 
   useEffect(() => {
     if (!stateRef.current) return;
@@ -44,6 +49,18 @@ export function MatchScreen() {
             .sort((x, y) => y.overall - x.overall)[0];
           if (replacement) substitute(s, s.teams.indexOf(bot) as 0 | 1, tired.id, replacement.id);
         }
+      }
+      // Pause for red card dialog on human team (only in interactive / non-bot mode)
+      if (s.redCardPausePending !== null && !s.settings.vsBot === false) {
+        // vsBot=false means 2-player mode — still pause. Always pause on human red.
+        setPaused(true);
+        setRedCardDialog({ teamIdx: s.redCardPausePending });
+        s.redCardPausePending = null;
+      } else if (s.redCardPausePending !== null) {
+        // vsBot=true: also pause to ask the human
+        setPaused(true);
+        setRedCardDialog({ teamIdx: s.redCardPausePending });
+        s.redCardPausePending = null;
       }
       rerender();
       if (s.finished) {
@@ -85,6 +102,31 @@ export function MatchScreen() {
       <div className="max-w-3xl mx-auto px-4 mt-4">
         <Ticker state={state} />
       </div>
+
+      {redCardDialog !== null && state && (
+        <RedCardDialog
+          teamIdx={redCardDialog.teamIdx}
+          state={state}
+          onClose={(accepted) => {
+            setRedCardDialog(null);
+            if (accepted && state) {
+              // Apply emergency formation: 5-3-2 (removes a forward slot)
+              const team = state.teams[redCardDialog.teamIdx];
+              team.formation = "5-3-2";
+              team.starting = autoLineup(team.squad.filter((p) => !p.redCarded), "5-3-2");
+              const slots = slotsFor("5-3-2");
+              for (const p of team.squad) {
+                const idx = team.starting.indexOf(p.id);
+                p.onField = idx >= 0 && !p.redCarded;
+                p.fieldPosition = idx >= 0 ? slots[idx] : undefined;
+                p.slotIndex = idx >= 0 ? idx : undefined;
+              }
+            }
+            setPaused(false);
+            rerender();
+          }}
+        />
+      )}
 
       {panelOpen !== null && (
         <TacticsPanel
@@ -129,7 +171,7 @@ function Ticker({ state }: { state: MatchState }) {
       </div>
       <div className="mt-3 space-y-2">
         {events.map((ev, i) => (
-          <div key={i} className={`card p-3 text-sm ${eventClass(ev.kind)}`}>
+          <div key={i} className={`card p-3 text-sm ${eventClass(ev.kind, ev.text)}`}>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{ev.minute}'</div>
             <div className="mt-0.5">{ev.text}</div>
           </div>
@@ -139,14 +181,61 @@ function Ticker({ state }: { state: MatchState }) {
   );
 }
 
-function eventClass(kind: string): string {
+function eventClass(kind: string, text?: string): string {
   switch (kind) {
     case "goal": return "border-l-4 border-primary bg-primary/5";
     case "card": return "border-l-4 border-yellow-500";
     case "final": return "border-l-4 border-primary bg-primary/10";
     case "kickoff": return "border-l-4 border-lime-600";
-    default: return "";
+    case "insight": return "border-l-4 border-blue-500 bg-blue-500/8";
+    default:
+      if (text?.startsWith("[AUTO]")) return "border-l-4 border-orange-400 bg-orange-400/8";
+      if (text?.startsWith("[AVISO]")) return "border-l-4 border-yellow-400 bg-yellow-400/8";
+      return "";
   }
+}
+
+function RedCardDialog({ teamIdx, state, onClose }: {
+  teamIdx: 0 | 1;
+  state: MatchState;
+  onClose: (accepted: boolean) => void;
+}) {
+  const team = state.teams[teamIdx];
+  const onFieldCount = team.squad.filter((p) => p.onField && !p.redCarded).length;
+  return (
+    <div className="fixed inset-0 z-40 bg-black/70 flex items-center justify-center p-4">
+      <div className="bg-background text-foreground rounded-2xl w-full max-w-md p-6 shadow-xl">
+        <div className="text-center">
+          <div className="inline-flex items-center justify-center h-10 w-10 rounded-full bg-red-500 mb-4">
+            <span className="text-white font-black text-sm sr-only">Roja</span>
+            <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5 text-white" aria-hidden="true"><rect x="4" y="3" width="10" height="14" rx="1"/></svg>
+          </div>
+          <h3 className="font-display text-xl font-black">Jugador expulsado</h3>
+          <p className="text-sm text-muted-foreground mt-2">
+            Tu equipo ({team.config.name}) se queda con {onFieldCount} jugadores en cancha.
+            ¿Querés pasar a una formación de emergencia (5-3-2)?
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Si decís que no, el partido continúa con la formación actual y un hombre menos.
+          </p>
+        </div>
+        <div className="mt-6 grid grid-cols-2 gap-3">
+          <button
+            className="btn-secondary"
+            onClick={() => onClose(false)}
+          >
+            No, seguir igual
+          </button>
+          <button
+            className="btn-primary"
+            onClick={() => onClose(true)}
+          >
+            Si, 5-3-2 emergencia
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function TacticsPanel({ teamIdx, state, onClose, onChange }: {

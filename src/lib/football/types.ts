@@ -80,12 +80,23 @@ export interface MatchStats {
 export interface MatchEvent {
   minute: number;
   text: string;
-  kind: "info" | "goal" | "chance" | "card" | "sub" | "foul" | "corner" | "kickoff" | "final";
+  kind: "info" | "goal" | "chance" | "card" | "sub" | "foul" | "corner" | "kickoff" | "final" | "insight";
   team?: 0 | 1;
+}
+
+/** Automatizaciones tácticas configurables por el usuario. Todas off por defecto. */
+export interface AutomationRules {
+  /** Ganando por 1 después del min 75 → lineHeight "Baja" + style "Defensivo". */
+  closingDown: boolean;
+  /** Rival expulsado → lineHeight "Alta". */
+  exploitRedCard: boolean;
+  /** Jugador propio por debajo de 60 % de stamina → notificación de sub sugerida. */
+  staminaAlert: boolean;
 }
 
 export interface MatchSettings {
   injuriesEnabled: boolean;
   maxSubs: number;
   vsBot: boolean;
+  automations: AutomationRules;
 }

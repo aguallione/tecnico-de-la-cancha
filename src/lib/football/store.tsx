@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import type { FormationName, MatchSettings, Player, PlayerMatchStats, Style, Team, TeamConfig } from "@/lib/football/types";
+import type { AutomationRules, FormationName, MatchSettings, Player, PlayerMatchStats, Style, Team, TeamConfig } from "@/lib/football/types";
 import { generateSquad } from "@/lib/football/players";
 import { autoLineup } from "@/lib/football/bot";
 
@@ -69,7 +69,8 @@ const Ctx = createContext<GameCtx | null>(null);
 export function GameProvider({ children }: { children: ReactNode }) {
   const [screen, setScreen] = useState<Screen>("home");
   const [teams, setTeams] = useState<[Team | null, Team | null]>([null, null]);
-  const [settings, setSettings] = useState<MatchSettings>({ injuriesEnabled: true, maxSubs: 5, vsBot: true });
+  const defaultAutomations: AutomationRules = { closingDown: false, exploitRedCard: false, staminaAlert: false };
+  const [settings, setSettings] = useState<MatchSettings>({ injuriesEnabled: true, maxSubs: 5, vsBot: true, automations: defaultAutomations });
   const [activeLockerTeam, setActiveLockerTeam] = useState<0 | 1>(0);
   const [testMode, setTestMode] = useState(false);
   const [lastMatchStats, setLastMatchStats] = useState<Record<string, PlayerMatchStats>>({});
