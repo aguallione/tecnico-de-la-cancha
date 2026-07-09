@@ -68,6 +68,38 @@ export function SetupScreen() {
                 onChange={(e) => setSettings({ ...settings, maxSubs: Math.max(0, Math.min(11, parseInt(e.target.value) || 0)) })}
               />
             </label>
+            <div className="border-t border-border pt-3 mt-1 space-y-3">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 shrink-0"
+                  checked={settings.seeRivalSquad ?? true}
+                  onChange={(e) => setSettings({ ...settings, seeRivalSquad: e.target.checked })}
+                />
+                <div>
+                  <div className="font-medium">Conocer plantel del rival</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    Si está desactivado, no se verán los nombres ni posiciones de los jugadores rivales en el vestuario.
+                  </div>
+                </div>
+              </label>
+              <label className={`flex items-start gap-3 ${!(settings.seeRivalSquad ?? true) ? "opacity-40 pointer-events-none" : "cursor-pointer"}`}>
+                <input
+                  type="checkbox"
+                  className="mt-0.5 shrink-0"
+                  checked={settings.seeRivalRatings ?? true}
+                  disabled={!(settings.seeRivalSquad ?? true)}
+                  onChange={(e) => setSettings({ ...settings, seeRivalRatings: e.target.checked })}
+                />
+                <div>
+                  <div className="font-medium">Conocer valoraciones del rival</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    Si está desactivado, los puntajes de los jugadores rivales se ocultan con "?" en el vestuario.
+                    Requiere "Conocer plantel del rival" activado.
+                  </div>
+                </div>
+              </label>
+            </div>
           </div>
         </div>
 

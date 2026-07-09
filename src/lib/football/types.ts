@@ -99,4 +99,8 @@ export interface MatchSettings {
   maxSubs: number;
   vsBot: boolean;
   automations: AutomationRules;
+  /** Mostrar nombres y posiciones del plantel rival en el vestuario. Default: true. */
+  seeRivalSquad: boolean;
+  /** Mostrar valoraciones numéricas de los jugadores rivales. Solo aplica si seeRivalSquad es true. Default: true. */
+  seeRivalRatings: boolean;
 }

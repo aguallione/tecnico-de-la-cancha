@@ -9,12 +9,21 @@ export function ConfirmScreen() {
   const strengthA = previewStrength(a);
   const strengthB = previewStrength(b);
 
+  const seeRivalSquad = settings.seeRivalSquad ?? true;
+  const seeRivalRatings = settings.seeRivalRatings ?? true;
+
   return (
     <div className="min-h-screen bg-background text-foreground px-4 py-8">
       <div className="max-w-3xl mx-auto">
         <h1 className="font-display text-3xl font-black text-center">Previa del partido</h1>
         <div className="mt-8 grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] items-center gap-6">
-          <TeamPreview team={a} strength={strengthA} align="right" />
+          <TeamPreview
+            team={a}
+            strength={strengthA}
+            align="right"
+            showDetails={seeRivalSquad}
+            showRatings={seeRivalRatings}
+          />
           <div className="text-center">
             <div className="font-display text-5xl font-black">VS</div>
             <div className="mt-2 text-xs text-muted-foreground">
@@ -22,7 +31,13 @@ export function ConfirmScreen() {
               {settings.injuriesEnabled ? " · Lesiones ON" : ""}
             </div>
           </div>
-          <TeamPreview team={b} strength={strengthB} align="left" />
+          <TeamPreview
+            team={b}
+            strength={strengthB}
+            align="left"
+            showDetails={seeRivalSquad}
+            showRatings={seeRivalRatings}
+          />
         </div>
 
         <div className="mt-10 flex flex-col sm:flex-row gap-3">
@@ -40,10 +55,14 @@ function TeamPreview({
   team,
   strength,
   align,
+  showDetails,
+  showRatings,
 }: {
   team: Team;
   strength: { attack: number; defense: number };
   align: "left" | "right";
+  showDetails: boolean;
+  showRatings: boolean;
 }) {
   const isRight = align === "right";
   return (
@@ -52,20 +71,34 @@ function TeamPreview({
         <span className="h-6 w-6 rounded-full shrink-0" style={{ backgroundColor: team.config.color }} />
         <div className="min-w-0">
           <div className="font-display font-black text-xl truncate">{team.config.name}</div>
-          <div className="text-xs text-muted-foreground">{team.formation} · {team.style}</div>
-          <div className="text-[11px] text-muted-foreground mt-0.5">
-            Línea {team.lineHeight} · Salida {team.buildUp} · Presión {team.pressIntensity}
-          </div>
+          {showDetails ? (
+            <>
+              <div className="text-xs text-muted-foreground">{team.formation} · {team.style}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">
+                Línea {team.lineHeight} · Salida {team.buildUp} · Presión {team.pressIntensity}
+              </div>
+            </>
+          ) : (
+            <div className="text-xs text-muted-foreground">Información oculta</div>
+          )}
         </div>
       </div>
       <div className={`mt-4 grid grid-cols-2 gap-3 ${isRight ? "sm:text-right" : "sm:text-left"}`}>
         <div className="rounded-lg bg-muted/50 px-3 py-2">
           <div className="text-xs text-muted-foreground uppercase tracking-wider">Ataque</div>
-          <div className="font-display font-black text-3xl text-primary">{strength.attack}</div>
+          {showRatings ? (
+            <div className="font-display font-black text-3xl text-primary">{strength.attack}</div>
+          ) : (
+            <div className="font-display font-black text-3xl text-muted-foreground" aria-label="Valoración oculta">?</div>
+          )}
         </div>
         <div className="rounded-lg bg-muted/50 px-3 py-2">
           <div className="text-xs text-muted-foreground uppercase tracking-wider">Defensa</div>
-          <div className="font-display font-black text-3xl text-primary">{strength.defense}</div>
+          {showRatings ? (
+            <div className="font-display font-black text-3xl text-primary">{strength.defense}</div>
+          ) : (
+            <div className="font-display font-black text-3xl text-muted-foreground" aria-label="Valoración oculta">?</div>
+          )}
         </div>
       </div>
     </div>
