@@ -245,20 +245,28 @@ function RedCardDialog({ teamIdx, state, onClose }: {
 function LiveSlotGrid({ team, onChange }: { team: Team; onChange: () => void }) {
   const slots = slotsFor(team.formation);
 
+  // Solo jugadores actualmente en cancha y sin tarjeta roja.
+  // Esta función NO permite traer jugadores del banco: solo intercambia posiciones
+  // entre los 11 (o menos, si hubo expulsión) que ya están jugando.
+  const onFieldPlayers = team.squad.filter((p) => p.onField && !p.redCarded);
+
   function swapSlot(slotIndex: number, newPlayerId: string) {
     const current = team.starting[slotIndex];
     if (current === newPlayerId) return;
     const otherSlot = team.starting.indexOf(newPlayerId);
     if (otherSlot >= 0) {
-      // El jugador ya es titular: intercambiar slots
+      // Ambos son titulares en cancha: intercambiar slots entre sí.
       team.starting[otherSlot] = current;
+    } else {
+      // El jugador destino no está en starting (no debería pasar con el filtro,
+      // pero como salvaguarda lo ignoramos sin hacer nada).
+      return;
     }
     team.starting[slotIndex] = newPlayerId;
-    // Actualizar fieldPosition y slotIndex en los jugadores afectados
+    // Actualizar fieldPosition y slotIndex solo para los jugadores en cancha afectados.
     for (const p of team.squad) {
       const idx = team.starting.indexOf(p.id);
-      if (idx >= 0) {
-        p.onField = !p.redCarded;
+      if (idx >= 0 && p.onField && !p.redCarded) {
         p.fieldPosition = slots[idx] as Position;
         p.slotIndex = idx;
       }
@@ -282,8 +290,6 @@ function LiveSlotGrid({ team, onChange }: { team: Team; onChange: () => void }) 
                 const factor = player ? outOfPositionFactor({ ...player, fieldPosition: slotPos }) : 1;
                 const oop = player && factor < 1;
                 const effective = player ? Math.round(player.overall * factor) : 0;
-                // Available players: all squad members not red-carded
-                const available = team.squad.filter((p) => !p.redCarded);
                 return (
                   <label key={slotIdx} className="flex flex-col items-center text-center min-w-0 flex-1 max-w-[6rem]">
                     <span className="text-[9px] uppercase tracking-wider text-lime-200/80">{POSITION_SHORT[slotPos]}</span>
@@ -292,7 +298,8 @@ function LiveSlotGrid({ team, onChange }: { team: Team; onChange: () => void }) 
                       onChange={(e) => swapSlot(slotIdx, e.target.value)}
                       className="mt-0.5 w-full appearance-none rounded bg-white/90 text-foreground text-[10px] font-medium px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary truncate"
                     >
-                      {available.map((p) => (
+                      {/* Solo jugadores que ya están en cancha — sin banco */}
+                      {onFieldPlayers.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name} ({p.overall} {POSITION_SHORT[p.position]})
                         </option>
@@ -301,7 +308,7 @@ function LiveSlotGrid({ team, onChange }: { team: Team; onChange: () => void }) 
                     {player && (
                       <div className="text-[9px] text-lime-100/70 mt-0.5">
                         {oop ? (
-                          <span className="text-red-400">{player.overall} → {effective}</span>
+                          <span className="text-red-400">{player.overall} &rarr; {effective}</span>
                         ) : (
                           <span>{player.overall}</span>
                         )}

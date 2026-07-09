@@ -342,6 +342,8 @@ export function tickMinute(state: MatchState): MatchEvent[] {
     }
 
     // Rule 3: Jugador propio con stamina < 60 → notificación (solo una vez por jugador)
+    // Se evalúa para el equipo humano identificado, pero como en modo 2 jugadores
+    // AMBOS son "humanos", el bloque se repite abajo para el otro equipo también.
     if (auto.staminaAlert) {
       const tired = humanTeam.squad.find(
         (p) => p.onField && !p.redCarded && p.stamina < 60 && !state.staminaAlertFired.has(p.id),
@@ -349,6 +351,25 @@ export function tickMinute(state: MatchState): MatchEvent[] {
       if (tired) {
         state.staminaAlertFired.add(tired.id);
         newEvents.push(C.autoStaminaAlert(state.minute, tired.name, humanTeam.config.name));
+      }
+    }
+  }
+
+  // En modo 2 jugadores ambos equipos son "humanos": el bloque anterior solo detecta
+  // el primero (índice 0). Evaluamos el segundo equipo de forma explícita si también
+  // es humano y es distinto del que ya procesamos arriba.
+  if (auto && auto.staminaAlert) {
+    for (const [idx, team] of state.teams.entries()) {
+      // Saltar si ya fue cubierto por el bloque principal (humanTeamIdx)
+      if (idx === humanTeamIdx) continue;
+      // Solo si no es bot
+      if (team.config.isBot) continue;
+      const tired = team.squad.find(
+        (p) => p.onField && !p.redCarded && p.stamina < 60 && !state.staminaAlertFired.has(p.id),
+      );
+      if (tired) {
+        state.staminaAlertFired.add(tired.id);
+        newEvents.push(C.autoStaminaAlert(state.minute, tired.name, team.config.name));
       }
     }
   }
