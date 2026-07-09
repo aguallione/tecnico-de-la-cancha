@@ -76,6 +76,9 @@ export function StatsScreen() {
           <PlayerRatings team={b} stats={lastMatchStats} />
         </div>
 
+        {/* Panel de verificación de consistencia — solo en modo test */}
+        {testMode && <ConsistencyCheck teamA={a} teamB={b} stats={lastMatchStats} />}
+
         <div className="mt-6 flex gap-3">
           {testMode ? (
             <>
@@ -86,6 +89,83 @@ export function StatsScreen() {
           <button className="btn-ghost flex-1" onClick={reset}>{testMode ? "Salir" : "Nueva partida"}</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Verificación de consistencia del motor (solo en modo test) ───────────────
+function ConsistencyCheck({
+  teamA,
+  teamB,
+  stats,
+}: {
+  teamA: Team;
+  teamB: Team;
+  stats: Record<string, PlayerMatchStats>;
+}) {
+  interface Check {
+    label: string;
+    expected: number;
+    got: number;
+  }
+
+  function checksFor(team: Team, rival: Team): Check[] {
+    // Invariante 1: goles del marcador == suma de goles individuales
+    const goalsFromStats = Object.values(stats)
+      .filter((s) => team.squad.some((p) => p.id === s.playerId))
+      .reduce((sum, s) => sum + s.goals, 0);
+
+    // Invariante 2: atajadas + goles_recibidos == tiros_al_arco_recibidos
+    // Los tiros al arco recibidos del equipo = shotsOnTarget del rival.
+    const goalsReceived = rival.goals;
+    const shotsOnTargetReceived = rival.shotsOnTarget;
+
+    return [
+      { label: `${team.config.name}: goles marcador`, expected: goalsFromStats, got: team.goals },
+      {
+        label: `${team.config.name}: atajadas+goles_rec == tiros_al_arco_rec`,
+        expected: shotsOnTargetReceived,
+        got: team.saves + goalsReceived,
+      },
+    ];
+  }
+
+  const checks: Check[] = [...checksFor(teamA, teamB), ...checksFor(teamB, teamA)];
+  const allOk = checks.every((c) => c.expected === c.got);
+
+  return (
+    <div
+      className={`mt-6 rounded-xl border p-4 ${
+        allOk
+          ? "border-green-500/40 bg-green-500/10"
+          : "border-red-500/40 bg-red-500/10"
+      }`}
+    >
+      <h2 className="font-display font-bold text-sm uppercase tracking-wider">
+        {allOk ? "Consistencia del motor: OK" : "Consistencia del motor: ERROR"}
+      </h2>
+      <div className="mt-3 space-y-1.5">
+        {checks.map((c) => {
+          const ok = c.expected === c.got;
+          return (
+            <div key={c.label} className="flex items-center justify-between gap-3 text-xs">
+              <span className="text-muted-foreground">{c.label}</span>
+              <span
+                className={`font-display font-bold tabular-nums ${
+                  ok ? "text-green-400" : "text-red-400"
+                }`}
+              >
+                {ok ? `${c.got} ✓` : `esperado ${c.expected}, got ${c.got} ✗`}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      {!allOk && (
+        <div className="mt-3 text-xs text-red-400">
+          Hay inconsistencias — revisar el motor antes de continuar.
+        </div>
+      )}
     </div>
   );
 }
