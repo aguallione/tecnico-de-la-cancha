@@ -16,15 +16,41 @@ export type Screen =
 
 export function makeTeam(config: TeamConfig): Team {
   const squad = generateSquad(20);
+  return makeTeamFromSquad(config, squad);
+}
+
+/**
+ * Igual que makeTeam pero acepta un plantel ya construido (desde archivo o API).
+ * Garantiza que los jugadores tengan los campos de estado dinámico correctos y
+ * no toca los atributos, por lo que el motor los trata exactamente igual que los
+ * jugadores generados automáticamente.
+ */
+export function makeTeamFromSquad(config: TeamConfig, squad: Player[]): Team {
+  // Normalizar estado dinámico por si el plantel viene de una fuente externa
+  const normalizedSquad: Player[] = squad.map((p) => ({
+    ...p,
+    stamina: 100,
+    onField: false,
+    redCarded: false,
+    yellowCards: 0,
+    injured: false,
+    fieldPosition: undefined,
+    slotIndex: undefined,
+  }));
+
   const formation: FormationName = "4-4-2";
-  const starting = autoLineup(squad, formation);
+  const starting = autoLineup(normalizedSquad, formation);
   const style: Style = "Equilibrado";
-  const starters = squad.filter((p) => starting.includes(p.id));
-  const captain = starters.reduce((a, b) => (a.overall > b.overall ? a : b), starters[0]);
-  const kicker = [...starters].sort((a, b) => b.attack - a.attack)[0];
+  const starters = normalizedSquad.filter((p) => starting.includes(p.id));
+  const captain = starters.length
+    ? starters.reduce((a, b) => (a.overall > b.overall ? a : b), starters[0])
+    : normalizedSquad[0];
+  const kicker = starters.length
+    ? [...starters].sort((a, b) => b.attack - a.attack)[0]
+    : normalizedSquad[0];
   return {
     config,
-    squad,
+    squad: normalizedSquad,
     formation,
     starting,
     style,

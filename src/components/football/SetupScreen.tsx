@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { makeTeam, useGame } from "@/lib/football/store";
+import { makeTeamFromSquad, useGame } from "@/lib/football/store";
+import type { Player } from "@/lib/football/types";
+import { generateSquad } from "@/lib/football/players";
+import { SquadOriginSelector } from "@/components/football/SquadOriginSelector";
 
 const COLORS = [
   { name: "Rojo", value: "#dc2626" },
@@ -16,19 +19,23 @@ export function SetupScreen() {
   const { setScreen, setTeams, settings, setSettings, setActiveLockerTeam } = useGame();
   const [name1, setName1] = useState("");
   const [color1, setColor1] = useState(COLORS[0].value);
+  const [squad1, setSquad1] = useState<Player[]>(() => generateSquad(20));
   const [name2, setName2] = useState("");
   const [color2, setColor2] = useState(COLORS[1].value);
+  const [squad2, setSquad2] = useState<Player[]>(() => generateSquad(20));
 
   const vsBot = settings.vsBot;
   const team2Label = vsBot ? "Bot (rival)" : "Jugador 2";
 
   function start() {
-    const t1 = makeTeam({ name: name1.trim() || "Jugador 1", color: color1, isBot: false });
-    const t2 = makeTeam({
-      name: name2.trim() || (vsBot ? "CPU FC" : "Jugador 2"),
-      color: color2,
-      isBot: vsBot,
-    });
+    const t1 = makeTeamFromSquad(
+      { name: name1.trim() || "Jugador 1", color: color1, isBot: false },
+      squad1,
+    );
+    const t2 = makeTeamFromSquad(
+      { name: name2.trim() || (vsBot ? "CPU FC" : "Jugador 2"), color: color2, isBot: vsBot },
+      squad2,
+    );
     setTeams([t1, t2]);
     setActiveLockerTeam(0);
     setScreen("handoff");
@@ -44,8 +51,22 @@ export function SetupScreen() {
         </p>
 
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <TeamCard title="Jugador 1" name={name1} setName={setName1} color={color1} setColor={setColor1} />
-          <TeamCard title={team2Label} name={name2} setName={setName2} color={color2} setColor={setColor2} disabled={vsBot ? false : false} />
+          <TeamCard
+            title="Jugador 1"
+            name={name1}
+            setName={setName1}
+            color={color1}
+            setColor={setColor1}
+            onSquadReady={setSquad1}
+          />
+          <TeamCard
+            title={team2Label}
+            name={name2}
+            setName={setName2}
+            color={color2}
+            setColor={setColor2}
+            onSquadReady={setSquad2}
+          />
         </div>
 
         <div className="card p-4 mt-6">
@@ -158,32 +179,50 @@ function AutomationToggle({ checked, onChange, label, description }: {
   );
 }
 
-function TeamCard({ title, name, setName, color, setColor }: {
-  title: string; name: string; setName: (v: string) => void;
-  color: string; setColor: (v: string) => void; disabled?: boolean;
+function TeamCard({
+  title,
+  name,
+  setName,
+  color,
+  setColor,
+  onSquadReady,
+}: {
+  title: string;
+  name: string;
+  setName: (v: string) => void;
+  color: string;
+  setColor: (v: string) => void;
+  onSquadReady: (squad: Player[]) => void;
 }) {
   return (
     <div className="card p-4">
       <h3 className="font-display font-bold text-lg">{title}</h3>
-      <label className="block mt-3 text-xs uppercase tracking-wider text-muted-foreground">Nombre del equipo</label>
+      <label className="block mt-3 text-xs uppercase tracking-wider text-muted-foreground">
+        Nombre del equipo
+      </label>
       <input
         className="input mt-1 w-full"
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="Ej: Los Titanes"
       />
-      <label className="block mt-3 text-xs uppercase tracking-wider text-muted-foreground">Color de camiseta</label>
+      <label className="block mt-3 text-xs uppercase tracking-wider text-muted-foreground">
+        Color de camiseta
+      </label>
       <div className="mt-2 flex flex-wrap gap-2">
         {COLORS.map((c) => (
           <button
             key={c.value}
             aria-label={c.name}
             onClick={() => setColor(c.value)}
-            className={`h-8 w-8 rounded-full border-2 transition ${color === c.value ? "border-primary scale-110" : "border-border"}`}
+            className={`h-8 w-8 rounded-full border-2 transition ${
+              color === c.value ? "border-primary scale-110" : "border-border"
+            }`}
             style={{ backgroundColor: c.value }}
           />
         ))}
       </div>
+      <SquadOriginSelector onSquadReady={onSquadReady} />
     </div>
   );
 }
