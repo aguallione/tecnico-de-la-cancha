@@ -1,3 +1,4 @@
+'use client';
 /**
  * SquadOriginSelector.tsx
  *
@@ -6,6 +7,10 @@
  *   1. "auto"   → generateSquad (comportamiento previo, sin cambios)
  *   2. "file"   → el usuario sube un JSON con la estructura de Player
  *   3. "api"    → busca un equipo real en API-Football
+ *
+ * IMPORTANTE: 'use client' es obligatorio para que import.meta.env.VITE_*
+ * esté disponible en SSR (TanStack Start). Sin esta directiva, la variable
+ * se evalúa en el servidor donde no existe y devuelve undefined.
  */
 
 import { useRef, useState } from "react";
