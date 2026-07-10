@@ -13,6 +13,16 @@ export interface MatchState {
   teams: [Team, Team];
   settings: MatchSettings;
   playerStats: Record<string, PlayerMatchStats>;
+  /** Set to the team index (0|1) when a red card just happened and the UI should pause for a dialog. */
+  redCardPausePending: (0 | 1) | null;
+  /** Tracks which player ids have already triggered a stamina alert (to fire only once). */
+  staminaAlertFired: Set<string>;
+  /** Tracks which automation "closingDown" already fired (per team). */
+  closingDownFired: [boolean, boolean];
+  /** Tracks which automation "exploitRedCard" already fired (per team). */
+  exploitRedFired: [boolean, boolean];
+  /** Tracks at which minutes AI insights were last emitted. */
+  lastInsightMinute: number;
 }
 
 function rand(): number { return Math.random(); }
@@ -188,6 +198,11 @@ export function initMatch(teams: [Team, Team], settings: MatchSettings): MatchSt
     teams,
     settings,
     playerStats,
+    redCardPausePending: null,
+    staminaAlertFired: new Set<string>(),
+    closingDownFired: [false, false],
+    exploitRedFired: [false, false],
+    lastInsightMinute: 0,
   };
 }
 
@@ -293,6 +308,148 @@ export function tickMinute(state: MatchState): MatchEvent[] {
     }
   } else if (state.minute % 7 === 0) {
     newEvents.push(C.tickComment(state.minute));
+  }
+
+  // ─── Automatizaciones tácticas ──────────────────────────────────────────────
+  const auto = state.settings.automations;
+  const rawHumanIdx = state.teams.findIndex((t) => !t.config.isBot);
+  const humanTeamIdx: (0 | 1) | null = rawHumanIdx === 0 ? 0 : rawHumanIdx === 1 ? 1 : null;
+
+  if (auto && humanTeamIdx !== null) {
+    const humanTeam = state.teams[humanTeamIdx];
+    const rivalIdx = humanTeamIdx === 0 ? 1 : 0;
+    const rivalTeam = state.teams[rivalIdx];
+
+    // Rule 1: Ganando por 1 después del min 75 → lineHeight Baja + style Defensivo
+    if (auto.closingDown && !state.closingDownFired[humanTeamIdx] && state.minute > 75) {
+      const lead = humanTeam.goals - rivalTeam.goals;
+      if (lead === 1) {
+        humanTeam.lineHeight = "Baja";
+        humanTeam.style = "Defensivo";
+        state.closingDownFired[humanTeamIdx] = true;
+        newEvents.push(C.autoClosingDown(state.minute, humanTeam.config.name));
+      }
+    }
+
+    // Rule 2: Rival queda con un jugador expulsado → lineHeight Alta
+    if (auto.exploitRedCard && !state.exploitRedFired[humanTeamIdx]) {
+      const rivalReds = rivalTeam.squad.filter((p) => p.redCarded).length;
+      if (rivalReds >= 1) {
+        humanTeam.lineHeight = "Alta";
+        state.exploitRedFired[humanTeamIdx] = true;
+        newEvents.push(C.autoExploitRed(state.minute, humanTeam.config.name));
+      }
+    }
+
+    // Rule 3: Jugador propio con stamina < 60 → notificación (solo una vez por jugador)
+    // Se evalúa para el equipo humano identificado, pero como en modo 2 jugadores
+    // AMBOS son "humanos", el bloque se repite abajo para el otro equipo también.
+    if (auto.staminaAlert) {
+      const tired = humanTeam.squad.find(
+        (p) => p.onField && !p.redCarded && p.stamina < 60 && !state.staminaAlertFired.has(p.id),
+      );
+      if (tired) {
+        state.staminaAlertFired.add(tired.id);
+        newEvents.push(C.autoStaminaAlert(state.minute, tired.name, humanTeam.config.name));
+      }
+    }
+  }
+
+  // En modo 2 jugadores ambos equipos son "humanos": el bloque anterior solo detecta
+  // el primero (índice 0). Evaluamos el segundo equipo de forma explícita si también
+  // es humano y es distinto del que ya procesamos arriba.
+  if (auto && auto.staminaAlert) {
+    for (const [idx, team] of state.teams.entries()) {
+      // Saltar si ya fue cubierto por el bloque principal (humanTeamIdx)
+      if (idx === humanTeamIdx) continue;
+      // Solo si no es bot
+      if (team.config.isBot) continue;
+      const tired = team.squad.find(
+        (p) => p.onField && !p.redCarded && p.stamina < 60 && !state.staminaAlertFired.has(p.id),
+      );
+      if (tired) {
+        state.staminaAlertFired.add(tired.id);
+        newEvents.push(C.autoStaminaAlert(state.minute, tired.name, team.config.name));
+      }
+    }
+  }
+
+  // ─── Señal de pausa para expulsión del equipo humano (modo interactivo) ─────
+  if (state.redCardPausePending === null && humanTeamIdx !== null) {
+    const redThisTick = newEvents.find((ev) => ev.kind === "card" && ev.text.includes("ROJA"));
+    if (redThisTick) {
+      const humanTeam = state.teams[humanTeamIdx];
+      const humanHadRed = humanTeam.squad.some(
+        (p) => p.redCarded && !state.staminaAlertFired.has("__red_checked_" + p.id),
+      );
+      if (humanHadRed) {
+        for (const p of humanTeam.squad) {
+          if (p.redCarded) state.staminaAlertFired.add("__red_checked_" + p.id);
+        }
+        state.redCardPausePending = humanTeamIdx;
+      }
+    }
+  }
+
+  // ─── Sugerencias de IA cada 15–20 minutos simulados ─────────────────────────
+  // Se generan sugerencias para AMBOS equipos (humanos y bots por igual),
+  // cada una identificada con el equipo al que corresponde, para que en modo
+  // 2 jugadores ambos reciban información relevante en el relato compartido.
+  const insightInterval = 15 + Math.floor(rand() * 6); // 15–20 minutos
+  if (state.minute - state.lastInsightMinute >= insightInterval && state.minute > 5 && !state.finished) {
+    state.lastInsightMinute = state.minute;
+    const [TA, TB] = state.teams;
+    const [posA, posB] = possessionPct(state);
+
+    // Genera insights para un equipo concreto frente a su rival.
+    function insightsFor(team: Team, rival: Team, possession: number): string[] {
+      const results: string[] = [];
+      const prefix = team.config.name;
+
+      // Posesión muy baja → sugerir salida más lenta
+      if (possession <= 35) {
+        results.push(`${prefix}: posesión muy baja (${possession}%). Considerá una salida más lenta para mantener la pelota.`);
+      }
+      // Posesión dominante
+      if (possession >= 65) {
+        results.push(`${prefix}: domina la posesión (${possession}%). Bien parado en el mediocampo.`);
+      }
+
+      // Jugador con stamina crítica
+      const veryTired = team.squad
+        .filter((p) => p.onField && !p.redCarded && p.stamina < 50)
+        .sort((x, y) => x.stamina - y.stamina)[0];
+      if (veryTired) {
+        results.push(`${prefix}: ${veryTired.name} tiene el físico muy bajo (${Math.round(veryTired.stamina)}%). Considerá un cambio.`);
+      }
+
+      // Eficacia del rival contra este equipo
+      if (rival.shots > 0 && rival.shotsOnTarget / rival.shots > 0.55) {
+        results.push(`${prefix}: el rival es muy eficaz (${rival.shotsOnTarget} tiros al arco de ${rival.shots}). Reforzá la defensa.`);
+      }
+
+      // Diferencia de xG marcada
+      if (team.xg > 0 && rival.xg > 0) {
+        if (rival.xg > team.xg * 1.6) {
+          results.push(`${prefix}: el rival genera más peligro real (xG ${rival.xg.toFixed(1)} vs ${team.xg.toFixed(1)}). Está siendo más efectivo.`);
+        } else if (team.xg > rival.xg * 1.6) {
+          results.push(`${prefix}: generás más peligro que el rival (xG ${team.xg.toFixed(1)} vs ${rival.xg.toFixed(1)}). Bien posicionados.`);
+        }
+      }
+
+      return results;
+    }
+
+    // Generar un insight para cada equipo (independientemente de si es bot o humano)
+    const insightsA = insightsFor(TA, TB, posA);
+    const insightsB = insightsFor(TB, TA, posB);
+
+    if (insightsA.length > 0) {
+      newEvents.push(C.aiInsight(state.minute, insightsA[Math.floor(Math.random() * insightsA.length)]));
+    }
+    if (insightsB.length > 0) {
+      newEvents.push(C.aiInsight(state.minute, insightsB[Math.floor(Math.random() * insightsB.length)]));
+    }
   }
 
   // Final
