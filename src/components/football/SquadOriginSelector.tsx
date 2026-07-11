@@ -3,25 +3,26 @@
  * SquadOriginSelector.tsx
  *
  * Selector del origen del plantel para cada equipo en la pantalla de configuración.
- * Tres modos que conviven sin modificar el motor del partido:
- *   1. "auto"   → generateSquad (comportamiento previo, sin cambios)
- *   2. "file"   → el usuario sube un JSON con la estructura de Player
- *   3. "api"    → busca un equipo real en API-Football
+ * Cuatro modos:
+ *   1. "auto"    → generateSquad (comportamiento previo, sin cambios)
+ *   2. "file"    → sube un JSON → guarda automáticamente en Supabase
+ *   3. "saved"   → lista los equipos guardados en Supabase
+ *   4. "api"     → busca un equipo real en API-Football
  *
  * IMPORTANTE: 'use client' es obligatorio para que import.meta.env.VITE_*
- * esté disponible en SSR (TanStack Start). Sin esta directiva, la variable
- * se evalúa en el servidor donde no existe y devuelve undefined.
+ * esté disponible en SSR (TanStack Start).
  */
 
 import { useRef, useState } from "react";
+import { Trash2, RefreshCw } from "lucide-react";
 import type { Player } from "@/lib/football/types";
 import { generateSquad } from "@/lib/football/players";
 import { searchTeams, fetchSquad } from "@/lib/football/api-football";
+import { useEquiposGuardados } from "@/hooks/use-equipos-guardados";
 
-type OriginMode = "auto" | "file" | "api";
+type OriginMode = "auto" | "file" | "saved" | "api";
 
 interface Props {
-  /** Callback invocado cuando el plantel queda listo (en cualquiera de los tres modos). */
   onSquadReady: (squad: Player[]) => void;
 }
 
@@ -44,7 +45,9 @@ function validateSquad(raw: unknown): Player[] {
 
     const pos = typeof p.position === "string" ? p.position.toUpperCase() : null;
     if (!pos || !VALID_POSITIONS.has(pos))
-      throw new Error(`Jugador ${i + 1} (${name}): posición inválida "${p.position}". Valores válidos: GK, DEF, MID, FWD.`);
+      throw new Error(
+        `Jugador ${i + 1} (${name}): posición inválida "${p.position}". Valores válidos: GK, DEF, MID, FWD.`,
+      );
 
     const toNum = (key: string, min: number, max: number, fallback: number): number => {
       const v = Number(p[key]);
@@ -88,9 +91,11 @@ function validateSquad(raw: unknown): Player[] {
 
 export function SquadOriginSelector({ onSquadReady }: Props) {
   const [mode, setMode] = useState<OriginMode>("auto");
-
-  // Estado compartido de "plantel listo"
   const [squadLabel, setSquadLabel] = useState<string | null>(null);
+
+  // El hook se monta siempre para que la lista esté lista cuando el usuario
+  // cambia al tab "Mis equipos".
+  const db = useEquiposGuardados();
 
   function handleModeChange(m: OriginMode) {
     setMode(m);
@@ -100,26 +105,33 @@ export function SquadOriginSelector({ onSquadReady }: Props) {
       onSquadReady(squad);
       setSquadLabel("Generado automáticamente (20 jugadores)");
     }
+    if (m === "saved") {
+      // Refrescar lista al entrar al tab
+      db.refrescar();
+    }
   }
+
+  const tabs: { value: OriginMode; label: string }[] = [
+    { value: "auto", label: "Automático" },
+    { value: "file", label: "Desde archivo" },
+    { value: "saved", label: "Mis equipos" },
+    { value: "api", label: "Equipo real" },
+  ];
 
   return (
     <div className="mt-3">
       <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-2">
         Origen del plantel
       </label>
-      <div className="flex gap-1 rounded-lg bg-muted p-1">
-        {(
-          [
-            { value: "auto", label: "Automático" },
-            { value: "file", label: "Desde archivo" },
-            { value: "api", label: "Equipo real" },
-          ] as const
-        ).map(({ value, label }) => (
+
+      {/* Selector de tabs — dos filas para que quepan bien en tarjetas angostas */}
+      <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
+        {tabs.map(({ value, label }) => (
           <button
             key={value}
             type="button"
             onClick={() => handleModeChange(value)}
-            className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+            className={`rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
               mode === value
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
@@ -131,16 +143,16 @@ export function SquadOriginSelector({ onSquadReady }: Props) {
       </div>
 
       {mode === "auto" && (
-        <AutoMode onReady={(label) => setSquadLabel(label)} onSquadReady={onSquadReady} />
+        <AutoMode onReady={setSquadLabel} onSquadReady={onSquadReady} />
       )}
       {mode === "file" && (
-        <FileMode
-          onReady={(label) => setSquadLabel(label)}
-          onSquadReady={onSquadReady}
-        />
+        <FileMode onReady={setSquadLabel} onSquadReady={onSquadReady} db={db} />
+      )}
+      {mode === "saved" && (
+        <SavedMode onReady={setSquadLabel} onSquadReady={onSquadReady} db={db} />
       )}
       {mode === "api" && (
-        <ApiMode onReady={(label) => setSquadLabel(label)} onSquadReady={onSquadReady} />
+        <ApiMode onReady={setSquadLabel} onSquadReady={onSquadReady} />
       )}
 
       {squadLabel && (
@@ -179,37 +191,66 @@ function AutoMode({
   );
 }
 
-// ─── Modo archivo ──────────────────────────────────────────────────────────────
+// ─── Modo archivo (con guardado automático en Supabase) ────────────────────────
 
 function FileMode({
   onReady,
   onSquadReady,
+  db,
 }: {
   onReady: (label: string) => void;
   onSquadReady: (squad: Player[]) => void;
+  db: ReturnType<typeof useEquiposGuardados>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [savedOk, setSavedOk] = useState(false);
+
+  // Nombre de equipo para guardar — pre-rellenado con el nombre del archivo
+  const [teamName, setTeamName] = useState("");
+  const [pendingSquad, setPendingSquad] = useState<Player[] | null>(null);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setError(null);
+    setParseError(null);
+    setSaveError(null);
+    setSavedOk(false);
+    setPendingSquad(null);
+
+    // Sugerir el nombre del equipo a partir del nombre del archivo
+    const suggested = file.name.replace(/\.json$/i, "").replace(/[-_]/g, " ").trim();
+    setTeamName(suggested);
 
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
         const raw = JSON.parse(ev.target?.result as string);
         const squad = validateSquad(raw);
+        setPendingSquad(squad);
         onSquadReady(squad);
         onReady(`Plantel cargado desde archivo (${squad.length} jugadores)`);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Archivo inválido.");
+        setParseError(err instanceof Error ? err.message : "Archivo inválido.");
       }
     };
     reader.readAsText(file);
-    // Limpiar el input para permitir volver a cargar el mismo archivo
     e.target.value = "";
+  }
+
+  async function handleSave() {
+    if (!pendingSquad || !teamName.trim()) return;
+    setSaving(true);
+    setSaveError(null);
+    const result = await db.guardar(teamName.trim(), pendingSquad);
+    setSaving(false);
+    if (!result.ok) {
+      setSaveError(result.error ?? "Error al guardar.");
+    } else {
+      setSavedOk(true);
+    }
   }
 
   return (
@@ -244,11 +285,167 @@ function FileMode({
         className="hidden"
         onChange={handleFile}
       />
-      {error && (
+
+      {parseError && (
         <p className="text-xs text-destructive-foreground bg-destructive rounded px-2 py-1">
-          {error}
+          {parseError}
         </p>
       )}
+
+      {/* Guardar en Supabase — solo visible después de parsear exitosamente */}
+      {pendingSquad && !parseError && (
+        <div className="rounded-lg border border-border bg-muted/40 p-3 space-y-2">
+          <p className="text-xs font-medium text-foreground">Guardar en Mis equipos</p>
+          <div className="flex gap-2">
+            <input
+              className="input flex-1 text-xs"
+              placeholder="Nombre del equipo"
+              value={teamName}
+              onChange={(e) => {
+                setTeamName(e.target.value);
+                setSavedOk(false);
+              }}
+              disabled={saving || savedOk}
+            />
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || savedOk || !teamName.trim()}
+              className="btn-primary text-xs py-1 px-3 shrink-0 disabled:opacity-50"
+            >
+              {saving ? "Guardando..." : savedOk ? "Guardado" : "Guardar"}
+            </button>
+          </div>
+          {saveError && (
+            <p className="text-xs text-destructive-foreground bg-destructive rounded px-2 py-1">
+              {saveError}
+            </p>
+          )}
+          {savedOk && (
+            <p className="text-xs text-primary">
+              Equipo guardado correctamente. Podés cargarlo desde "Mis equipos" en el futuro.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Modo equipos guardados ────────────────────────────────────────────────────
+
+function SavedMode({
+  onReady,
+  onSquadReady,
+  db,
+}: {
+  onReady: (label: string) => void;
+  onSquadReady: (squad: Player[]) => void;
+  db: ReturnType<typeof useEquiposGuardados>;
+}) {
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  async function handleDelete(id: string) {
+    setDeletingId(id);
+    setDeleteError(null);
+    const result = await db.eliminar(id);
+    setDeletingId(null);
+    if (!result.ok) setDeleteError(result.error ?? "Error al eliminar.");
+    if (selectedId === id) setSelectedId(null);
+  }
+
+  function handleSelect(equipo: { id: string; nombre: string; plantel: Player[] }) {
+    setSelectedId(equipo.id);
+    onSquadReady(equipo.plantel);
+    onReady(`${equipo.nombre} (${equipo.plantel.length} jugadores) — desde Mis equipos`);
+  }
+
+  if (db.loading) {
+    return (
+      <div className="mt-2 text-xs text-muted-foreground">Cargando equipos guardados...</div>
+    );
+  }
+
+  if (db.error) {
+    return (
+      <div className="mt-2 space-y-2">
+        <p className="text-xs text-destructive-foreground bg-destructive rounded px-2 py-1">
+          {db.error}
+        </p>
+        <button
+          type="button"
+          onClick={db.refrescar}
+          className="text-xs text-primary underline underline-offset-2"
+        >
+          Reintentar
+        </button>
+      </div>
+    );
+  }
+
+  if (db.equipos.length === 0) {
+    return (
+      <div className="mt-2 text-xs text-muted-foreground">
+        No hay equipos guardados todavía. Subí un archivo JSON desde "Desde archivo" para guardar
+        tu primer plantel.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs text-muted-foreground">
+          {db.equipos.length} equipo{db.equipos.length !== 1 ? "s" : ""} guardado
+          {db.equipos.length !== 1 ? "s" : ""}
+        </span>
+        <button
+          type="button"
+          onClick={db.refrescar}
+          aria-label="Refrescar lista"
+          className="text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <RefreshCw size={12} />
+        </button>
+      </div>
+
+      {deleteError && (
+        <p className="text-xs text-destructive-foreground bg-destructive rounded px-2 py-1">
+          {deleteError}
+        </p>
+      )}
+
+      <ul className="rounded-lg border border-border bg-background divide-y divide-border overflow-hidden">
+        {db.equipos.map((equipo) => (
+          <li key={equipo.id} className="flex items-center gap-2 px-3 py-2">
+            <button
+              type="button"
+              onClick={() => handleSelect(equipo)}
+              className={`flex-1 text-left text-sm transition-colors ${
+                selectedId === equipo.id
+                  ? "text-primary font-semibold"
+                  : "text-foreground hover:text-primary"
+              }`}
+            >
+              <span className="font-medium">{equipo.nombre}</span>
+              <span className="ml-2 text-xs text-muted-foreground">
+                {equipo.plantel.length} jug.
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDelete(equipo.id)}
+              disabled={deletingId === equipo.id}
+              aria-label={`Eliminar ${equipo.nombre}`}
+              className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-40 shrink-0"
+            >
+              <Trash2 size={14} />
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -387,8 +584,8 @@ function ApiMode({
       )}
 
       <p className="text-[11px] text-muted-foreground">
-        Los atributos Ataque/Defensa/Físico/Velocidad se generan a partir del puesto y la valoración
-        de la API. Plan gratuito: 100 peticiones/día.
+        Los atributos Ataque/Defensa/Físico/Velocidad se generan a partir del puesto y la
+        valoración de la API. Plan gratuito: 100 peticiones/día.
       </p>
     </div>
   );
