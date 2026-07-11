@@ -41,6 +41,7 @@ export function LockerScreen() {
   if (!maybeTeam) return null;
   const team: Team = maybeTeam;
   const otherIdx = activeLockerTeam === 0 ? 1 : 0;
+  const seeOwnRatings = settings.seeOwnRatings ?? true;
 
   const [, forceTick] = useState(0);
   const rerender = () => forceTick((n) => n + 1);
@@ -124,7 +125,9 @@ export function LockerScreen() {
             <span className="h-5 w-5 rounded-full shrink-0" style={{ backgroundColor: team.config.color }} />
             <h1 className="font-display text-2xl sm:text-3xl font-black truncate">{team.config.name} · Vestuario</h1>
           </div>
-          <div className="text-xs text-muted-foreground">Promedio: {Math.round(starters.reduce((s, p) => s + p.overall, 0) / (starters.length || 1))}</div>
+          {seeOwnRatings && (
+            <div className="text-xs text-muted-foreground">Promedio: {Math.round(starters.reduce((s, p) => s + p.overall, 0) / (starters.length || 1))}</div>
+          )}
         </div>
 
         {/* Táctica */}
@@ -207,7 +210,7 @@ export function LockerScreen() {
           <PitchLines />
           <div className="relative z-10 grid grid-rows-4 h-[420px] p-3 gap-1">
             {(["FWD", "MID", "DEF", "GK"] as Position[]).map((row) => (
-              <SlotRow key={row} team={team} slots={slots} rowPos={row} onSwap={swapSlot} />
+              <SlotRow key={row} team={team} slots={slots} rowPos={row} onSwap={swapSlot} seeOwnRatings={seeOwnRatings} />
             ))}
           </div>
         </div>
@@ -220,16 +223,20 @@ export function LockerScreen() {
           })).filter((s) => s.p);
           const oopList = starters.filter((s) => s.p!.position !== s.pos);
           if (oopList.length === 0) return null;
-          const baseAvg = Math.round(avg(starters.map((s) => s.p!.overall)));
-          const effAvg = Math.round(avg(starters.map((s) => s.p!.overall * outOfPositionFactor({ ...s.p!, fieldPosition: s.pos }))));
-          return (
-            <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3">
-              <div className="flex items-center gap-2 text-sm font-semibold text-red-300">
-                <span>⚠ {oopList.length} jugador{oopList.length > 1 ? "es" : ""} fuera de posición</span>
-                <span className="text-muted-foreground">·</span>
-                <span>Promedio base: <b className="text-foreground">{baseAvg}</b></span>
-                <span className="text-red-400">→ Efectivo: <b>{effAvg}</b></span>
-              </div>
+              const baseAvg = Math.round(avg(starters.map((s) => s.p!.overall)));
+              const effAvg = Math.round(avg(starters.map((s) => s.p!.overall * outOfPositionFactor({ ...s.p!, fieldPosition: s.pos }))));
+              return (
+                <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-red-300">
+                    <span>⚠ {oopList.length} jugador{oopList.length > 1 ? "es" : ""} fuera de posición</span>
+                    {seeOwnRatings && (
+                      <>
+                        <span className="text-muted-foreground">·</span>
+                        <span>Promedio base: <b className="text-foreground">{baseAvg}</b></span>
+                        <span className="text-red-400">→ Efectivo: <b>{effAvg}</b></span>
+                      </>
+                    )}
+                  </div>
               <div className="mt-1 text-xs text-red-200/70">
                 {oopList.map((s) => `${s.p!.name} (${POSITION_SHORT[s.p!.position]}→${POSITION_SHORT[s.pos]})`).join(" · ")}
               </div>
@@ -250,9 +257,11 @@ export function LockerScreen() {
                   <div className="truncate font-medium">{p.name}</div>
                   <div className="text-xs text-muted-foreground">{POSITION_LABEL[p.position]} · {p.age} años</div>
                 </div>
-                <div className="text-right">
-                  <div className="font-display font-black text-lg">{p.overall}</div>
-                </div>
+                {seeOwnRatings && (
+                  <div className="text-right">
+                    <div className="font-display font-black text-lg">{p.overall}</div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -370,23 +379,25 @@ function IndividualRoles({ team, slots, onChange }: {
   );
 }
 
-function SlotRow({ team, slots, rowPos, onSwap }: {
+function SlotRow({ team, slots, rowPos, onSwap, seeOwnRatings }: {
   team: Team; slots: Position[]; rowPos: Position;
   onSwap: (slotIndex: number, newPlayerId: string) => void;
+  seeOwnRatings: boolean;
 }) {
   const indexes = slots.map((s, i) => (s === rowPos ? i : -1)).filter((i) => i >= 0);
   return (
     <div className="flex items-center justify-around gap-2">
       {indexes.map((i) => (
-        <SlotChip key={i} team={team} slotIndex={i} onSwap={onSwap} slotPos={slots[i]} />
+        <SlotChip key={i} team={team} slotIndex={i} onSwap={onSwap} slotPos={slots[i]} seeOwnRatings={seeOwnRatings} />
       ))}
     </div>
   );
 }
 
-function SlotChip({ team, slotIndex, slotPos, onSwap }: {
+function SlotChip({ team, slotIndex, slotPos, onSwap, seeOwnRatings }: {
   team: Team; slotIndex: number; slotPos: Position;
   onSwap: (slotIndex: number, newPlayerId: string) => void;
+  seeOwnRatings: boolean;
 }) {
   const id = team.starting[slotIndex];
   const p = team.squad.find((pp) => pp.id === id);
@@ -403,20 +414,32 @@ function SlotChip({ team, slotIndex, slotPos, onSwap }: {
       >
         {team.squad.map((sp) => (
           <option key={sp.id} value={sp.id}>
-            {sp.name} ({sp.overall} {POSITION_SHORT[sp.position]})
+            {seeOwnRatings
+              ? `${sp.name} (${sp.overall} ${POSITION_SHORT[sp.position]})`
+              : `${sp.name} (${POSITION_SHORT[sp.position]})`}
           </option>
         ))}
       </select>
       {p && (
         <div className="mt-1 flex items-center gap-1">
-          <span className="text-[10px] text-lime-100/70">
-            Físico {Math.round(p.physical)}
-          </span>
-          <span className="text-[10px] font-bold text-lime-100/90">{p.overall}</span>
-          {oop && (
-            <span className="text-[10px] font-bold text-red-400" title={`Fuera de posición: ${POSITION_LABEL[p.position]} jugando de ${POSITION_LABEL[slotPos]}`}>
-              → {effective}
-            </span>
+          {seeOwnRatings ? (
+            <>
+              <span className="text-[10px] text-lime-100/70">
+                Físico {Math.round(p.physical)}
+              </span>
+              <span className="text-[10px] font-bold text-lime-100/90">{p.overall}</span>
+              {oop && (
+                <span className="text-[10px] font-bold text-red-400" title={`Fuera de posición: ${POSITION_LABEL[p.position]} jugando de ${POSITION_LABEL[slotPos]}`}>
+                  → {effective}
+                </span>
+              )}
+            </>
+          ) : (
+            oop && (
+              <span className="text-[10px] font-bold text-red-400" title={`Fuera de posición: ${POSITION_LABEL[p.position]} jugando de ${POSITION_LABEL[slotPos]}`}>
+                ⚠ Fuera de pos.
+              </span>
+            )
           )}
         </div>
       )}

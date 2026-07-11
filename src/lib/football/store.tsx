@@ -96,7 +96,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [screen, setScreen] = useState<Screen>("home");
   const [teams, setTeams] = useState<[Team | null, Team | null]>([null, null]);
   const defaultAutomations: AutomationRules = { closingDown: false, exploitRedCard: false, staminaAlert: false };
-  const [settings, setSettings] = useState<MatchSettings>({ injuriesEnabled: true, maxSubs: 5, vsBot: true, automations: defaultAutomations, seeRivalSquad: true, seeRivalRatings: true });
+  const [settings, setSettings] = useState<MatchSettings>({ injuriesEnabled: true, maxSubs: 5, vsBot: true, automations: defaultAutomations, seeRivalSquad: true, seeRivalRatings: true, seeOwnRatings: true });
   const [activeLockerTeam, setActiveLockerTeam] = useState<0 | 1>(0);
   const [testMode, setTestMode] = useState(false);
   const [lastMatchStats, setLastMatchStats] = useState<Record<string, PlayerMatchStats>>({});
