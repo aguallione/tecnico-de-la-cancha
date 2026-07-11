@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { AuthProvider } from "@/hooks/use-auth";
 import { GameProvider, useGame } from "@/lib/football/store";
 import { HomeScreen, ManualScreen } from "@/components/football/HomeScreen";
 import { SetupScreen } from "@/components/football/SetupScreen";
@@ -15,9 +16,11 @@ export const Route = createFileRoute("/")({
 
 function Index() {
   return (
-    <GameProvider>
-      <Router />
-    </GameProvider>
+    <AuthProvider>
+      <GameProvider>
+        <Router />
+      </GameProvider>
+    </AuthProvider>
   );
 }
 

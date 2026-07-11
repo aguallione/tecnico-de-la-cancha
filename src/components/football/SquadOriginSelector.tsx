@@ -2,23 +2,24 @@
 /**
  * SquadOriginSelector.tsx
  *
- * Selector del origen del plantel para cada equipo en la pantalla de configuración.
- * Cuatro modos:
- *   1. "auto"    → generateSquad (comportamiento previo, sin cambios)
- *   2. "file"    → sube un JSON → guarda automáticamente en Supabase
- *   3. "saved"   → lista los equipos guardados en Supabase
- *   4. "api"     → busca un equipo real en API-Football
+ * Selector del origen del plantel. Cuatro modos:
+ *   1. "auto"    → generateSquad (sin cambios)
+ *   2. "file"    → sube JSON → requiere sesión para guardar en Supabase
+ *   3. "saved"   → lista equipos del usuario autenticado en Supabase
+ *   4. "api"     → busca equipo real en API-Football
  *
  * IMPORTANTE: 'use client' es obligatorio para que import.meta.env.VITE_*
  * esté disponible en SSR (TanStack Start).
  */
 
 import { useRef, useState } from "react";
-import { Trash2, RefreshCw } from "lucide-react";
+import { Trash2, RefreshCw, LogIn } from "lucide-react";
 import type { Player } from "@/lib/football/types";
 import { generateSquad } from "@/lib/football/players";
 import { searchTeams, fetchSquad } from "@/lib/football/api-football";
 import { useEquiposGuardados } from "@/hooks/use-equipos-guardados";
+import { useAuth } from "@/hooks/use-auth";
+import { AuthModal } from "@/components/football/AuthModal";
 
 type OriginMode = "auto" | "file" | "saved" | "api";
 
@@ -46,7 +47,7 @@ function validateSquad(raw: unknown): Player[] {
     const pos = typeof p.position === "string" ? p.position.toUpperCase() : null;
     if (!pos || !VALID_POSITIONS.has(pos))
       throw new Error(
-        `Jugador ${i + 1} (${name}): posición inválida "${p.position}". Valores válidos: GK, DEF, MID, FWD.`,
+        `Jugador ${i + 1} (${name}): posición inválida "${p.position}". Válidos: GK, DEF, MID, FWD.`,
       );
 
     const toNum = (key: string, min: number, max: number, fallback: number): number => {
@@ -93,8 +94,7 @@ export function SquadOriginSelector({ onSquadReady }: Props) {
   const [mode, setMode] = useState<OriginMode>("auto");
   const [squadLabel, setSquadLabel] = useState<string | null>(null);
 
-  // El hook se monta siempre para que la lista esté lista cuando el usuario
-  // cambia al tab "Mis equipos".
+  // El hook se monta siempre para que la lista esté lista al cambiar de tab.
   const db = useEquiposGuardados();
 
   function handleModeChange(m: OriginMode) {
@@ -106,7 +106,6 @@ export function SquadOriginSelector({ onSquadReady }: Props) {
       setSquadLabel("Generado automáticamente (20 jugadores)");
     }
     if (m === "saved") {
-      // Refrescar lista al entrar al tab
       db.refrescar();
     }
   }
@@ -124,7 +123,7 @@ export function SquadOriginSelector({ onSquadReady }: Props) {
         Origen del plantel
       </label>
 
-      {/* Selector de tabs — dos filas para que quepan bien en tarjetas angostas */}
+      {/* Selector de tabs — dos filas para que quepan en tarjetas angostas */}
       <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
         {tabs.map(({ value, label }) => (
           <button
@@ -191,7 +190,7 @@ function AutoMode({
   );
 }
 
-// ─── Modo archivo (con guardado automático en Supabase) ────────────────────────
+// ─── Modo archivo ──────────────────────────────────────────────────────────────
 
 function FileMode({
   onReady,
@@ -202,15 +201,17 @@ function FileMode({
   onSquadReady: (squad: Player[]) => void;
   db: ReturnType<typeof useEquiposGuardados>;
 }) {
+  const { user } = useAuth();
   const inputRef = useRef<HTMLInputElement>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
-
-  // Nombre de equipo para guardar — pre-rellenado con el nombre del archivo
   const [teamName, setTeamName] = useState("");
   const [pendingSquad, setPendingSquad] = useState<Player[] | null>(null);
+
+  // Auth modal — se abre cuando el usuario intenta guardar sin sesión
+  const [authModalOpen, setAuthModalOpen] = useState(false);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -220,7 +221,6 @@ function FileMode({
     setSavedOk(false);
     setPendingSquad(null);
 
-    // Sugerir el nombre del equipo a partir del nombre del archivo
     const suggested = file.name.replace(/\.json$/i, "").replace(/[-_]/g, " ").trim();
     setTeamName(suggested);
 
@@ -242,6 +242,18 @@ function FileMode({
 
   async function handleSave() {
     if (!pendingSquad || !teamName.trim()) return;
+
+    // Gate: si no hay sesión, abrir modal de auth
+    if (!user) {
+      setAuthModalOpen(true);
+      return;
+    }
+
+    await doSave();
+  }
+
+  async function doSave() {
+    if (!pendingSquad || !teamName.trim()) return;
     setSaving(true);
     setSaveError(null);
     const result = await db.guardar(teamName.trim(), pendingSquad);
@@ -256,7 +268,7 @@ function FileMode({
   return (
     <div className="mt-2 space-y-2">
       <p className="text-xs text-muted-foreground">
-        Subí un archivo JSON con la estructura del plantel. Cada jugador debe tener:{" "}
+        Subí un JSON con el plantel. Cada jugador necesita:{" "}
         <code className="font-mono bg-muted px-1 rounded text-[10px]">
           name, position, overall, attack, defense, physical, pace, age
         </code>
@@ -292,10 +304,15 @@ function FileMode({
         </p>
       )}
 
-      {/* Guardar en Supabase — solo visible después de parsear exitosamente */}
+      {/* Panel de guardado — visible tras parsear exitosamente */}
       {pendingSquad && !parseError && (
         <div className="rounded-lg border border-border bg-muted/40 p-3 space-y-2">
           <p className="text-xs font-medium text-foreground">Guardar en Mis equipos</p>
+          {!user && (
+            <p className="text-[11px] text-muted-foreground">
+              Necesitás una cuenta para guardar equipos.
+            </p>
+          )}
           <div className="flex gap-2">
             <input
               className="input flex-1 text-xs"
@@ -311,9 +328,10 @@ function FileMode({
               type="button"
               onClick={handleSave}
               disabled={saving || savedOk || !teamName.trim()}
-              className="btn-primary text-xs py-1 px-3 shrink-0 disabled:opacity-50"
+              className="btn-primary text-xs py-1 px-3 shrink-0 disabled:opacity-50 flex items-center gap-1"
             >
-              {saving ? "Guardando..." : savedOk ? "Guardado" : "Guardar"}
+              {!user && <LogIn size={12} />}
+              {saving ? "Guardando..." : savedOk ? "Guardado" : user ? "Guardar" : "Guardar"}
             </button>
           </div>
           {saveError && (
@@ -323,11 +341,23 @@ function FileMode({
           )}
           {savedOk && (
             <p className="text-xs text-primary">
-              Equipo guardado correctamente. Podés cargarlo desde "Mis equipos" en el futuro.
+              Equipo guardado. Podés cargarlo desde "Mis equipos" en el futuro.
             </p>
           )}
         </div>
       )}
+
+      {/* Modal de auth */}
+      <AuthModal
+        open={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+        onSuccess={() => {
+          setAuthModalOpen(false);
+          // Reintentar el guardado ahora que hay sesión
+          doSave();
+        }}
+        reason="Para guardar equipos necesitás iniciar sesión o crear una cuenta. Es gratis."
+      />
     </div>
   );
 }
@@ -343,9 +373,42 @@ function SavedMode({
   onSquadReady: (squad: Player[]) => void;
   db: ReturnType<typeof useEquiposGuardados>;
 }) {
+  const { user } = useAuth();
+  const [authModalOpen, setAuthModalOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Si no hay sesión, mostrar gate de login
+  if (!user) {
+    return (
+      <div className="mt-2 rounded-lg border border-border bg-muted/40 p-4 text-center space-y-3">
+        <p className="text-sm text-foreground font-medium">
+          Tus equipos guardados están protegidos por tu cuenta
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Iniciá sesión para ver y cargar los equipos que guardaste anteriormente.
+        </p>
+        <button
+          type="button"
+          onClick={() => setAuthModalOpen(true)}
+          className="btn-primary text-sm mx-auto flex items-center gap-2"
+        >
+          <LogIn size={14} />
+          Iniciar sesión
+        </button>
+        <AuthModal
+          open={authModalOpen}
+          onClose={() => setAuthModalOpen(false)}
+          onSuccess={() => {
+            setAuthModalOpen(false);
+            db.refrescar();
+          }}
+          reason="Iniciá sesión para acceder a tus equipos guardados."
+        />
+      </div>
+    );
+  }
 
   async function handleDelete(id: string) {
     setDeletingId(id);
@@ -363,9 +426,7 @@ function SavedMode({
   }
 
   if (db.loading) {
-    return (
-      <div className="mt-2 text-xs text-muted-foreground">Cargando equipos guardados...</div>
-    );
+    return <div className="mt-2 text-xs text-muted-foreground">Cargando equipos guardados...</div>;
   }
 
   if (db.error) {
@@ -388,7 +449,7 @@ function SavedMode({
   if (db.equipos.length === 0) {
     return (
       <div className="mt-2 text-xs text-muted-foreground">
-        No hay equipos guardados todavía. Subí un archivo JSON desde "Desde archivo" para guardar
+        No tenés equipos guardados todavía. Subí un archivo JSON desde "Desde archivo" para guardar
         tu primer plantel.
       </div>
     );
@@ -505,7 +566,7 @@ function ApiMode({
   if (!hasApiKey) {
     return (
       <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-        <strong>Clave de API no configurada.</strong> Para usar esta opción, añadí la variable{" "}
+        <strong>Clave de API no configurada.</strong> Añadí la variable{" "}
         <code className="font-mono bg-black/20 px-1 rounded">VITE_API_FOOTBALL_KEY</code> con tu
         clave del plan gratuito de{" "}
         <a
@@ -584,8 +645,8 @@ function ApiMode({
       )}
 
       <p className="text-[11px] text-muted-foreground">
-        Los atributos Ataque/Defensa/Físico/Velocidad se generan a partir del puesto y la
-        valoración de la API. Plan gratuito: 100 peticiones/día.
+        Los atributos se generan a partir del puesto y la valoración de la API. Plan gratuito: 100
+        peticiones/día.
       </p>
     </div>
   );
