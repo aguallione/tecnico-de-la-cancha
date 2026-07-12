@@ -24,6 +24,7 @@ export interface EquipoGuardado {
   usuario_id: string;
   nombre: string;
   plantel: Player[];
+  es_publico: boolean;
   creado_en: string;
 }
 
@@ -52,7 +53,7 @@ export function useEquiposGuardados() {
     setState((s) => ({ ...s, loading: true, error: null }));
     const { data, error } = await supabase
       .from("equipos_guardados")
-      .select("id, usuario_id, nombre, plantel, creado_en")
+      .select("id, usuario_id, nombre, plantel, es_publico, creado_en")
       .eq("usuario_id", user.id)
       .order("creado_en", { ascending: false });
 
@@ -121,12 +122,36 @@ export function useEquiposGuardados() {
     [user],
   );
 
+  // ── Alternar visibilidad pública de un equipo propio ──────────────────────
+
+  const togglePublico = useCallback(
+    async (id: string, esPublico: boolean): Promise<{ ok: boolean; error?: string }> => {
+      if (!user) return { ok: false, error: "No hay sesión activa." };
+
+      const { error } = await supabase
+        .from("equipos_guardados")
+        .update({ es_publico: esPublico })
+        .eq("id", id)
+        .eq("usuario_id", user.id);
+
+      if (error) return { ok: false, error: error.message };
+
+      setState((s) => ({
+        ...s,
+        equipos: s.equipos.map((e) => (e.id === id ? { ...e, es_publico: esPublico } : e)),
+      }));
+      return { ok: true };
+    },
+    [user],
+  );
+
   return {
     equipos: state.equipos,
     loading: state.loading,
     error: state.error,
     guardar,
     eliminar,
+    togglePublico,
     refrescar: cargar,
   };
 }
