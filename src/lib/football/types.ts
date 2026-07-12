@@ -103,4 +103,6 @@ export interface MatchSettings {
   seeRivalSquad: boolean;
   /** Mostrar valoraciones numéricas de los jugadores rivales. Solo aplica si seeRivalSquad es true. Default: true. */
   seeRivalRatings: boolean;
+  /** Mostrar valoraciones numéricas de los propios jugadores en el vestuario. Default: true. */
+  seeOwnRatings: boolean;
 }

@@ -120,6 +120,20 @@ export function SetupScreen() {
                   </div>
                 </div>
               </label>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 shrink-0"
+                  checked={settings.seeOwnRatings ?? true}
+                  onChange={(e) => setSettings({ ...settings, seeOwnRatings: e.target.checked })}
+                />
+                <div>
+                  <div className="font-medium">Ver valoraciones propias</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    Si está desactivado, los puntajes de tus propios jugadores se ocultan en el vestuario, forzando a elegir la alineación sin ver los números.
+                  </div>
+                </div>
+              </label>
             </div>
           </div>
         </div>
