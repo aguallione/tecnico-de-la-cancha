@@ -9,7 +9,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { estaConectado, type JugadorOnline } from "@/lib/online/types";
-import { transferirAdmin } from "@/server/tick-partida";
+import { transferirAdmin } from "@/lib/online/server-fns";
 
 interface Props {
   partidaId: string;

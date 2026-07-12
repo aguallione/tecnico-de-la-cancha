@@ -323,3 +323,8 @@ export async function fetchEquiposPublicos(): Promise<EquipoPublico[]> {
   if (error) throw new Error(error.message);
   return (data ?? []) as EquipoPublico[];
 }
+
+/** Elimina la partida completa (solo debe llamarse al terminar). */
+export async function cerrarPartida(partidaId: string): Promise<void> {
+  await supabase.from("partidas_online").delete().eq("id", partidaId);
+}

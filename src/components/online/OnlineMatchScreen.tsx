@@ -15,7 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useOnlineGame } from "@/lib/online/store";
 import { deserializeMatchState } from "@/lib/football/serialization";
 import { possessionPct } from "@/lib/football/engine";
-import { confirmarSub, tickPartida } from "@/server/tick-partida";
+import { confirmarSub, tickPartida } from "@/lib/online/server-fns";
 import { guardarAjustesPartida } from "@/lib/online/api";
 import type { Velocidad } from "@/lib/online/types";
 import type { Team } from "@/lib/football/types";
@@ -188,7 +188,7 @@ export function OnlineMatchScreen() {
         <TransferirAdminModal
           partidaId={partida.id}
           jugadores={jugadores}
-          deviceIdActual={deviceId}
+          adminDeviceId={partida.admin_device_id}
           onClose={() => setTransferOpen(false)}
           onDone={refrescar}
         />
