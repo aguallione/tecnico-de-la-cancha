@@ -173,8 +173,8 @@ function PlayerRatings({
                   </span>
                 )}
               </span>
-              {ps?.goals ? <span className="text-xs text-green-500">{ps.goals} gol(es)</span> : null}
-              {ps?.saves ? <span className="text-xs text-blue-500">{ps.saves} atj</span> : null}
+              {ps?.goals ? <span className="text-xs text-green-500">⚽{ps.goals}</span> : null}
+              {ps?.saves ? <span className="text-xs text-blue-500">🧤{ps.saves}</span> : null}
               <span
                 className={`font-display font-bold tabular-nums w-10 text-right ${
                   rating >= 7 ? "text-green-500" : rating < 5 ? "text-red-400" : ""

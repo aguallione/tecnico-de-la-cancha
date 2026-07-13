@@ -59,6 +59,8 @@ export function OnlineSetupScreen() {
             <ReadRow label="Lesiones" value={c.injuriesEnabled ? "Sí" : "No"} />
             <ReadRow label="Máximo de cambios" value={String(c.maxSubs)} />
             <ReadRow label="Ver plantel rival" value={c.seeRivalSquad ? "Sí" : "No"} />
+            <ReadRow label="Ver valoraciones rival" value={c.seeRivalRatings ? "Sí" : "No"} />
+            <ReadRow label="Ver valoraciones propias" value={c.seeOwnRatings ? "Sí" : "No"} />
             <ReadRow label="Velocidad" value={VELOCIDAD_LABEL[partida.velocidad]} />
             <ReadRow label="Bloque" value={`${partida.bloque_minutos} min`} />
           </div>
@@ -122,6 +124,30 @@ export function OnlineSetupScreen() {
               <div>
                 <div className="font-medium">Conocer plantel del rival</div>
                 <div className="text-xs text-muted-foreground">Muestra nombres y posiciones del rival en el vestuario.</div>
+              </div>
+            </label>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={settings.seeRivalRatings ?? true}
+                onChange={(e) => setSettings({ ...settings, seeRivalRatings: e.target.checked })}
+              />
+              <div>
+                <div className="font-medium">Conocer valoraciones del rival</div>
+                <div className="text-xs text-muted-foreground">Muestra el puntaje de los jugadores rivales (requiere ver plantel).</div>
+              </div>
+            </label>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={settings.seeOwnRatings ?? true}
+                onChange={(e) => setSettings({ ...settings, seeOwnRatings: e.target.checked })}
+              />
+              <div>
+                <div className="font-medium">Ver valoraciones propias</div>
+                <div className="text-xs text-muted-foreground">Ocultar para un modo más desafiante: cada DT ve a sus jugadores sin puntajes.</div>
               </div>
             </label>
           </div>

@@ -18,13 +18,21 @@ import { useMemo, useRef, useState } from "react";
 import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
 import { autoLineup } from "@/lib/football/bot";
 import { initMatch, outOfPositionFactor } from "@/lib/football/engine";
-import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
+import {
+  LINE_HEIGHT_TABLE,
+  BUILDUP_TABLE,
+  PRESS_TABLE,
+  ROLE_TABLE,
+  rolesForPosition,
+  roleEffect,
+} from "@/lib/football/tactics";
 import { serializeMatchState } from "@/lib/football/serialization";
 import type {
   BuildUp,
   FormationName,
   LineHeight,
   MatchSettings,
+  Player,
   Position,
   PressIntensity,
   Style,
@@ -362,6 +370,9 @@ function LockerInner({
           </div>
         </fieldset>
 
+        {/* Roles individuales — siempre visibles pero solo editables si canEdit */}
+        <IndividualRoles team={team} slots={slots} onChange={rerender} canEdit={canEdit} />
+
         {!canEdit && (
           <p className="mt-3 text-xs text-muted-foreground">
             En modo Roles solo el encargado de la alineación puede editarla.
@@ -416,6 +427,107 @@ function LockerInner({
           onDone={refrescar}
         />
       )}
+    </div>
+  );
+}
+
+const POSITION_SHORT_ROLES: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
+
+function RoleEffectBadge({ role }: { role: string | undefined }) {
+  const eff = roleEffect(role);
+  if (!role || (eff.attack === 0 && eff.defense === 0)) {
+    return <span className="text-[11px] text-muted-foreground">Sin efecto</span>;
+  }
+  const fmt = (n: number) => (n > 0 ? `+${n}` : `${n}`);
+  return (
+    <span className="text-[11px] flex items-center gap-2">
+      <span className={eff.attack > 0 ? "text-green-500" : eff.attack < 0 ? "text-red-400" : "text-muted-foreground"}>
+        ATA {fmt(eff.attack)}
+      </span>
+      <span className={eff.defense > 0 ? "text-green-500" : eff.defense < 0 ? "text-red-400" : "text-muted-foreground"}>
+        DEF {fmt(eff.defense)}
+      </span>
+    </span>
+  );
+}
+
+function IndividualRoles({
+  team,
+  slots,
+  onChange,
+  canEdit,
+}: {
+  team: Team;
+  slots: Position[];
+  onChange: () => void;
+  canEdit: boolean;
+}) {
+  const starters = team.starting
+    .map((id, i) => {
+      const p = team.squad.find((pp) => pp.id === id);
+      return p ? { p, fieldPos: slots[i] } : null;
+    })
+    .filter(Boolean) as Array<{ p: Player; fieldPos: Position }>;
+
+  return (
+    <div className="mt-6">
+      <h2 className="font-display font-bold text-lg">Roles individuales</h2>
+      <p className="text-xs text-muted-foreground mt-0.5">
+        Ajustan levemente el aporte de cada jugador al Nivel de Ataque o Defensa del equipo.
+      </p>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        {starters.map(({ p, fieldPos }) => {
+          const roles = rolesForPosition(fieldPos);
+          const groups = Array.from(new Set(roles.map((r) => ROLE_TABLE[r].group ?? "")));
+          const currentRole = roles.includes(p.individualRole || "") ? p.individualRole : "";
+          return (
+            <div key={p.id} className="card px-3 py-2 flex items-center justify-between gap-3 text-sm">
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">
+                  {p.name}{" "}
+                  <span className="text-xs text-muted-foreground">({POSITION_SHORT_ROLES[fieldPos]})</span>
+                </div>
+                {roles.length > 0 ? (
+                  <select
+                    className="input mt-1 w-full text-xs"
+                    disabled={!canEdit}
+                    value={currentRole || ""}
+                    onChange={(e) => {
+                      p.individualRole = e.target.value;
+                      onChange();
+                    }}
+                  >
+                    <option value="">Sin rol específico</option>
+                    {groups.map((g) =>
+                      g ? (
+                        <optgroup key={g} label={g}>
+                          {roles.filter((r) => ROLE_TABLE[r].group === g).map((r) => (
+                            <option key={r} value={r}>{r}</option>
+                          ))}
+                        </optgroup>
+                      ) : (
+                        roles.filter((r) => !ROLE_TABLE[r].group).map((r) => (
+                          <option key={r} value={r}>{r}</option>
+                        ))
+                      ),
+                    )}
+                  </select>
+                ) : (
+                  <div className="mt-1 text-xs text-muted-foreground">El arquero no tiene rol específico</div>
+                )}
+              </div>
+              <div className="text-right shrink-0">
+                <RoleEffectBadge role={currentRole || undefined} />
+                {currentRole && ROLE_TABLE[currentRole] && (
+                  <div className="text-[10px] text-muted-foreground mt-0.5 max-w-[8rem]">
+                    {ROLE_TABLE[currentRole].blurb}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
