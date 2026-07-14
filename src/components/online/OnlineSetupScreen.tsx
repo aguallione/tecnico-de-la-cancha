@@ -12,6 +12,7 @@ import type { AutomationRules, MatchSettings } from "@/lib/football/types";
 import { useOnlineGame } from "@/lib/online/store";
 import type { Velocidad } from "@/lib/online/types";
 import { actualizarEstado, guardarAjustesPartida, guardarConfiguracion } from "@/lib/online/api";
+import { OnlineHeader } from "@/components/online/OnlineHeader";
 
 const DEFAULT_AUTOMATIONS: AutomationRules = {
   closingDown: false,
@@ -86,6 +87,7 @@ export function OnlineSetupScreen() {
 
   return (
     <div className="min-h-screen bg-background text-foreground px-4 py-8">
+      <OnlineHeader />
       <div className="max-w-2xl mx-auto">
         <h1 className="font-display text-3xl font-black">Configuración de la partida</h1>
         <p className="text-muted-foreground text-sm mt-1">Sos el Admin: definí las reglas para todos.</p>

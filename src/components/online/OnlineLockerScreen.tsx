@@ -42,6 +42,7 @@ import { useOnlineGame } from "@/lib/online/store";
 import { estaConectado, type JugadorOnline, type ModoCoop } from "@/lib/online/types";
 import { guardarEquipo, guardarMatchState, marcarEquipoListo } from "@/lib/online/api";
 import { TransferirAdminModal } from "@/components/online/TransferirAdminModal";
+import { OnlineHeader } from "@/components/online/OnlineHeader";
 
 const POSITION_SHORT: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
 
@@ -201,6 +202,7 @@ function LockerInner({
 
   return (
     <div className="min-h-screen bg-background text-foreground pb-28">
+      <OnlineHeader />
       <div className="max-w-4xl mx-auto px-4 py-6">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-3 min-w-0">

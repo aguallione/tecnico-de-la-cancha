@@ -21,6 +21,7 @@ import {
 } from "@/lib/online/api";
 import { OnlineEquipoSelector } from "@/components/online/OnlineEquipoSelector";
 import { TransferirAdminModal } from "@/components/online/TransferirAdminModal";
+import { OnlineHeader } from "@/components/online/OnlineHeader";
 
 const TEAM_COLORS: [string, string] = ["#dc2626", "#2563eb"];
 
@@ -128,6 +129,7 @@ export function OnlineLobbyScreen() {
 
   return (
     <div className="min-h-screen bg-background text-foreground px-4 py-8">
+      <OnlineHeader />
       <div className="max-w-3xl mx-auto">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <h1 className="font-display text-2xl sm:text-3xl font-black">Sala online</h1>

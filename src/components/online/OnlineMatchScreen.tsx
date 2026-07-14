@@ -26,6 +26,7 @@ import type { Velocidad } from "@/lib/online/types";
 import type { BuildUp, FormationName, LineHeight, Position, PressIntensity, Style, Team } from "@/lib/football/types";
 import type { MatchState } from "@/lib/football/engine";
 import { TransferirAdminModal } from "@/components/online/TransferirAdminModal";
+import { OnlineHeader } from "@/components/online/OnlineHeader";
 
 // Milisegundos entre bloques según velocidad. "manual" no auto-avanza.
 const RITMO_MS: Record<Exclude<Velocidad, "manual">, number> = {
@@ -112,6 +113,7 @@ export function OnlineMatchScreen() {
 
   return (
     <div className="min-h-screen bg-background text-foreground pb-24">
+      <OnlineHeader />
       {/* Marcador */}
       <div className="sticky top-0 z-20 bg-pitch text-pitch-foreground shadow-md">
         <div className="max-w-3xl mx-auto px-4 py-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">

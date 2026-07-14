@@ -8,6 +8,10 @@
  *
  * La partida activa se persiste en localStorage (partida_id + jugador_id) para
  * sobrevivir a recargas de página.
+ *
+ * Reconexión: si al montar el componente hay partida_id + jugador_id en
+ * localStorage, se llama a reconectarJugador para limpiar el flag de
+ * desconexión y retomar el control.
  */
 
 import {
@@ -25,6 +29,7 @@ import {
   fetchJugadores,
   fetchPartida,
   getDeviceId,
+  reconectarJugador,
   salirDeLaPartida,
 } from "@/lib/online/api";
 import type { JugadorOnline, OnlineScreen, PartidaOnline } from "@/lib/online/types";
@@ -124,6 +129,13 @@ export function OnlineGameProvider({ children }: { children: ReactNode }) {
       clearInterval(id);
     };
   }, [partidaId, refrescar]);
+
+  // Reconexión: al montar con partida_id existente, limpiar el flag de
+  // desconexión para retomar el control dentro de la ventana de gracia.
+  useEffect(() => {
+    if (!partidaId || !deviceId) return;
+    reconectarJugador(partidaId, deviceId).catch(() => {});
+  }, [partidaId, deviceId]);
 
   // Heartbeat (5s) independiente del polling.
   const jugadorIdRef = useRef<string | null>(null);

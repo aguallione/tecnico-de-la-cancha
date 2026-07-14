@@ -12,11 +12,13 @@ import { useOnlineGame } from "@/lib/online/store";
 import { deserializeMatchState } from "@/lib/football/serialization";
 import { computePlayerRating, computeTeamRating, outOfPositionFactor } from "@/lib/football/engine";
 import type { Team, PlayerMatchStats } from "@/lib/football/types";
-import { cerrarPartida } from "@/lib/online/api";
+import { cerrarPartida, reiniciarPartida } from "@/lib/online/api";
+import { OnlineHeader } from "@/components/online/OnlineHeader";
 
 export function OnlineStatsScreen() {
-  const { partida, soyAdmin, salir } = useOnlineGame();
+  const { partida, soyAdmin, salir, refrescar } = useOnlineGame();
   const [cerrando, setCerrando] = useState(false);
+  const [reiniciando, setReiniciando] = useState(false);
 
   if (!partida?.match_state) {
     return (
@@ -57,13 +59,33 @@ export function OnlineStatsScreen() {
     await salir();
   }
 
+  async function jugarDeNuevo() {
+    if (!partida) return;
+    setReiniciando(true);
+    try {
+      await reiniciarPartida(partida.id);
+      await refrescar();
+    } catch {
+      // ignore
+    } finally {
+      setReiniciando(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground px-4 py-8">
+      <OnlineHeader />
       <div className="max-w-2xl mx-auto">
         <h1 className="font-display text-3xl font-black text-center">Final del partido</h1>
         <p className="text-center text-xs text-muted-foreground mt-1">
           Partida online · código {partida.codigo}
         </p>
+
+        {partida.abandono_forfeit && (
+          <div className="mt-4 rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 text-center text-sm text-yellow-200">
+            El partido terminó por abandono de un equipo.
+          </div>
+        )}
 
         <div className="mt-6 card p-6">
           <div className="grid grid-cols-3 items-center gap-4">
@@ -106,14 +128,29 @@ export function OnlineStatsScreen() {
           <PlayerRatings team={b} stats={stats} />
         </div>
 
-        <div className="mt-6 flex gap-3">
-          <button className="btn-ghost flex-1" onClick={() => salir()}>
-            Salir
-          </button>
+        <div className="mt-6 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              className="btn-secondary flex-1"
+              onClick={jugarDeNuevo}
+              disabled={reiniciando || !soyAdmin}
+              title={soyAdmin ? "" : "Solo el admin puede reiniciar la partida"}
+            >
+              {reiniciando ? "Reiniciando…" : "Jugar de nuevo en esta sala"}
+            </button>
+            <button className="btn-ghost flex-1" onClick={() => salir()}>
+              Ir al menú principal
+            </button>
+          </div>
           {soyAdmin && (
-            <button className="btn-primary flex-1" onClick={cerrar} disabled={cerrando}>
+            <button className="btn-primary w-full" onClick={cerrar} disabled={cerrando}>
               {cerrando ? "Cerrando…" : "Cerrar partida para todos"}
             </button>
+          )}
+          {!soyAdmin && (
+            <p className="text-xs text-muted-foreground text-center">
+              El admin puede reiniciar la partida o cerrar la sala.
+            </p>
           )}
         </div>
       </div>

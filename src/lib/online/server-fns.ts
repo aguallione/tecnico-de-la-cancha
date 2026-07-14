@@ -24,6 +24,7 @@ import type { MatchEvent } from "@/lib/football/types";
 import type { JugadorOnline, ModoCoop, PartidaOnline, SubPendiente } from "@/lib/online/types";
 
 const HEARTBEAT_TIMEOUT_MS = 15_000;
+const RECONNECT_GRACE_MS = 90_000;
 
 // ─── Helpers internos ─────────────────────────────────────────────────────────
 
@@ -169,6 +170,70 @@ export const tickPartida = createServerFn({ method: "POST" })
 
     await aplicarSucesion(partida, jugadores);
 
+    // Detectar jugadores desconectados (heartbeat expirado) y marcarlos.
+    // Si están fuera de la ventana de gracia de 90s, eliminarlos y aplicar
+    // las mismas reglas que el abandono voluntario (forfeit si era único humano).
+    const ahora = Date.now();
+    const supabase = getServiceClient();
+    for (const j of jugadores) {
+      if (!conectado(j, ahora) && !j.desconectado_en) {
+        // Marcar como desconectado
+        await supabase
+          .from("jugadores_online")
+          .update({ desconectado_en: new Date().toISOString() })
+          .eq("id", j.id);
+      }
+    }
+
+    // Procesar jugadores cuya gracia ya expiró
+    const jugadoresActualizados = await leerJugadores(data.partida_id);
+    for (const j of jugadoresActualizados) {
+      if (j.desconectado_en) {
+        const msDesdeDesc = ahora - new Date(j.desconectado_en).getTime();
+        if (msDesdeDesc > RECONNECT_GRACE_MS) {
+          // La gracia expiró: aplicar abandono involuntario
+          const otrosHumanos = jugadoresActualizados.filter(
+            (oj) => oj.equipo_idx === j.equipo_idx && oj.id !== j.id,
+          );
+
+          await supabase.from("jugadores_online").delete().eq("id", j.id);
+
+          if (partida.estado === "jugando" && partida.match_state && otrosHumanos.length === 0) {
+            const state = deserializeMatchState(partida.match_state as SerializedMatchState);
+            const equipoRivalIdx = (j.equipo_idx === 0 ? 1 : 0) as 0 | 1;
+            const rival = state.teams[equipoRivalIdx];
+            const propio = state.teams[j.equipo_idx as 0 | 1];
+            if (rival.goals <= propio.goals) {
+              rival.goals = propio.goals + 1;
+            }
+            state.finished = true;
+            state.events.push({
+              minute: state.minute,
+              kind: "final",
+              text: `${j.nombre} se desconectó. Victoria por abandono para ${rival.config.name}.`,
+            });
+            const serialized = serializeMatchState(state);
+            await supabase
+              .from("partidas_online")
+              .update({
+                match_state: serialized,
+                estado: "terminado",
+                abandono_forfeit: true,
+                actualizado_en: new Date().toISOString(),
+              })
+              .eq("id", data.partida_id);
+            return { ok: true as const, finished: true, eventos_nuevos: [] as MatchEvent[] };
+          }
+
+          // Sucesión de admin si era el admin
+          if (j.device_id === partida.admin_device_id) {
+            const restantes = jugadoresActualizados.filter((r) => r.id !== j.id);
+            await aplicarSucesion(partida, restantes);
+          }
+        }
+      }
+    }
+
     if (!partida.match_state) {
       return {
         ok: false as const,
@@ -193,7 +258,6 @@ export const tickPartida = createServerFn({ method: "POST" })
       eventosNuevos.push(...evs);
     }
 
-    const supabase = getServiceClient();
     const serialized = serializeMatchState(state);
     const nuevoEstado = state.finished ? "terminado" : "jugando";
     const { error } = await supabase
@@ -306,4 +370,91 @@ export const confirmarSub = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
 
     return { ok: true as const };
+  });
+
+// ─── abandonarSala ─────────────────────────────────────────────────────────────
+
+export const abandonarSala = createServerFn({ method: "POST" })
+  .validator(z.object({ partida_id: z.string(), jugador_id: z.string() }))
+  .handler(async ({ data }) => {
+    const supabase = getServiceClient();
+    const partida = await leerPartida(data.partida_id);
+    const jugadores = await leerJugadores(data.partida_id);
+    const jugador = jugadores.find((j) => j.id === data.jugador_id);
+    if (!jugador) throw new Error("Jugador no encontrado.");
+
+    const equipoIdx = jugador.equipo_idx;
+    const otrosHumanosEnMiEquipo = jugadores.filter(
+      (j) => j.equipo_idx === equipoIdx && j.id !== data.jugador_id,
+    );
+
+    // 1. Eliminar al jugador de la sala
+    await supabase.from("jugadores_online").delete().eq("id", data.jugador_id);
+
+    // 2. Si el partido está en curso y era el único humano de su equipo → forfeit
+    if (partida.estado === "jugando" && partida.match_state && otrosHumanosEnMiEquipo.length === 0) {
+      const state = deserializeMatchState(partida.match_state as SerializedMatchState);
+      const equipoRivalIdx = (equipoIdx === 0 ? 1 : 0) as 0 | 1;
+      const rival = state.teams[equipoRivalIdx];
+      const propio = state.teams[equipoIdx];
+
+      if (rival.goals <= propio.goals) {
+        rival.goals = propio.goals + 1;
+      }
+      state.finished = true;
+      state.events.push({
+        minute: state.minute,
+        kind: "final",
+        text: `El equipo ${propio.config.name} abandonó la sala. Victoria por abandono para ${rival.config.name}.`,
+      });
+
+      const serialized = serializeMatchState(state);
+      await supabase
+        .from("partidas_online")
+        .update({
+          match_state: serialized,
+          estado: "terminado",
+          abandono_forfeit: true,
+          actualizado_en: new Date().toISOString(),
+        })
+        .eq("id", data.partida_id);
+
+      return { ok: true as const, forfeit: true };
+    }
+
+    // 3. Sucesión de admin si era el admin
+    const jugadoresRestantes = jugadores.filter((j) => j.id !== data.jugador_id);
+    if (jugador.device_id === partida.admin_device_id) {
+      await aplicarSucesion(partida, jugadoresRestantes);
+    }
+
+    return { ok: true as const, forfeit: false };
+  });
+
+// ─── reconectarJugador ─────────────────────────────────────────────────────────
+
+export const reconectarJugador = createServerFn({ method: "POST" })
+  .validator(z.object({ partida_id: z.string(), device_id: z.string() }))
+  .handler(async ({ data }) => {
+    const supabase = getServiceClient();
+    const jugadores = await leerJugadores(data.partida_id);
+    const jugador = jugadores.find((j) => j.device_id === data.device_id);
+    if (!jugador) return { ok: false as const, motivo: "no_encontrado" };
+
+    if (jugador.desconectado_en) {
+      const msDesdeDesconexion = Date.now() - new Date(jugador.desconectado_en).getTime();
+      if (msDesdeDesconexion > RECONNECT_GRACE_MS) {
+        return { ok: false as const, motivo: "gracia_expirada" };
+      }
+    }
+
+    await supabase
+      .from("jugadores_online")
+      .update({
+        ultimo_heartbeat: new Date().toISOString(),
+        desconectado_en: null,
+      })
+      .eq("id", jugador.id);
+
+    return { ok: true as const, jugador_id: jugador.id };
   });

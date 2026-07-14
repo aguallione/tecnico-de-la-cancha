@@ -65,6 +65,8 @@ export interface PartidaOnline {
   modo_coop_1: ModoCoop;
   creado_en: string;
   actualizado_en: string;
+  /** True cuando un abandono durante el partido provocó victoria automática del rival. */
+  abandono_forfeit: boolean;
 }
 
 /** Fila de jugadores_online. */
@@ -80,6 +82,8 @@ export interface JugadorOnline {
   ultimo_heartbeat: string;
   usuario_id: string;
   unido_en: string;
+  /** Timestamp en que el servidor detectó la desconexión; null = conectado. */
+  desconectado_en: string | null;
 }
 
 /** Milisegundos tras los que un jugador se considera desconectado. */

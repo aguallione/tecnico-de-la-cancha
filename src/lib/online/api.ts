@@ -328,3 +328,53 @@ export async function fetchEquiposPublicos(): Promise<EquipoPublico[]> {
 export async function cerrarPartida(partidaId: string): Promise<void> {
   await supabase.from("partidas_online").delete().eq("id", partidaId);
 }
+
+// ─── Abandono y reconexión ─────────────────────────────────────────────────────
+
+/**
+ * Marca a un jugador como reconectado (limpia desconectado_en, actualiza heartbeat).
+ * Llamar al re-entrar a una sala donde el jugador ya existe por device_id.
+ */
+export async function reconectarJugador(
+  partidaId: string,
+  deviceId: string,
+): Promise<{ ok: boolean; jugador_id?: string }> {
+  const { data, error } = await supabase
+    .from("jugadores_online")
+    .update({
+      ultimo_heartbeat: new Date().toISOString(),
+      desconectado_en: null,
+    })
+    .eq("partida_id", partidaId)
+    .eq("device_id", deviceId)
+    .select("id")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return { ok: false };
+  return { ok: true, jugador_id: data.id };
+}
+
+/**
+ * Reinicia una partida terminada: limpia match_state, equipos, estado → "esperando".
+ * Mantiene el mismo código y los mismos jugadores conectados.
+ */
+export async function reiniciarPartida(partidaId: string): Promise<void> {
+  const { error } = await supabase
+    .from("partidas_online")
+    .update({
+      estado: "esperando",
+      match_state: null,
+      equipo_0: null,
+      equipo_1: null,
+      abandono_forfeit: false,
+      actualizado_en: new Date().toISOString(),
+    })
+    .eq("id", partidaId);
+  if (error) throw new Error(error.message);
+
+  // Resetear equipo_listo de todos los jugadores
+  await supabase
+    .from("jugadores_online")
+    .update({ equipo_listo: false, subs_pendientes: [] })
+    .eq("partida_id", partidaId);
+}
