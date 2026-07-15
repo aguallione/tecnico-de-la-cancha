@@ -183,6 +183,7 @@ function TeamCol({ team, align }: { team: Team; align: "left" | "right" }) {
 }
 
 function GKCard({ team, shotsOnTargetReceived }: { team: Team; shotsOnTargetReceived: number }) {
+  // fieldPosition contiene el PositionGroup del slot
   const gk = team.squad.find((p) => p.fieldPosition === "GK" && team.starting.includes(p.id));
   if (!gk) return null;
   const factor = outOfPositionFactor(gk);
@@ -196,7 +197,7 @@ function GKCard({ team, shotsOnTargetReceived }: { team: Team; shotsOnTargetRece
         <div>
           <div className="font-display font-bold">{gk.name}</div>
           <div className="text-xs text-muted-foreground">
-            {gk.position === "GK" ? "Arquero natural" : `Juega de ${gk.position} · FUERA DE POSICIÓN`}
+            {gk.position === "POR" ? "Arquero natural" : `Juega de ${gk.position} · FUERA DE POSICIÓN`}
           </div>
         </div>
         <div className="text-right">

@@ -1,4 +1,5 @@
-import type { MatchEvent, MatchSettings, MatchStats, Player, PlayerMatchStats, Position, Team } from "./types";
+import type { MatchEvent, MatchSettings, MatchStats, Player, PlayerMatchStats, Position, PositionGroup, Team } from "./types";
+import { POSITION_GROUP } from "./types";
 import { formationMatchup, slotsFor } from "./formations";
 import { BUILDUP_TABLE, PRESS_TABLE, teamTacticalAdjustment } from "./tactics";
 import * as C from "./commentary";
@@ -30,11 +31,11 @@ function pick<T>(a: T[]): T { return a[Math.floor(Math.random() * a.length)]; }
 
 /**
  * Peso relativo de probabilidad de que un jugador remate/convierta un gol,
- * según su posición EN CANCHA (no la natural). Refleja el fútbol real:
+ * según su grupo lógico EN CANCHA (no la natural). Refleja el fútbol real:
  * delanteros > mediocampistas > defensores > arqueros.
  * El arquero tiene un peso ínfimo (≈ penal de emergencia): prácticamente nunca convierte.
  */
-function scorerWeight(fieldPos: Position | undefined): number {
+function scorerWeight(fieldPos: PositionGroup | undefined): number {
   switch (fieldPos) {
     case "FWD": return 1.0;
     case "MID": return 0.5;
@@ -61,22 +62,24 @@ function weightedPick<T>(items: T[], weight: (t: T) => number): T | undefined {
 /**
  * Penalización por jugar fuera de posición.
  * Devuelve un multiplicador (0..1) que se aplica a los atributos efectivos.
+ * Compara el grupo lógico (GK/DEF/MID/FWD) de la posición natural del jugador
+ * con el grupo del slot asignado en la formación.
  *
- * - Cualquier jugador de campo puesto de arquero: -35% (atajar es una
- *   habilidad totalmente distinta).
- * - Arquero puesto de campo: -35% (mismo motivo, inverso).
- * - Puestos de campo vecinos (DEF↔MID, MID↔FWD): -12% (roles parecidos).
- * - Puestos de campo extremos (DEF↔FWD): -25% (roles muy distintos).
+ * - Cualquier jugador de campo puesto de arquero: -35%
+ * - Arquero puesto de campo: -35%
+ * - Grupos vecinos (DEF↔MID, MID↔FWD): -12%
+ * - Grupos extremos (DEF↔FWD): -25%
  */
 export function outOfPositionFactor(player: Player): number {
-  if (!player.fieldPosition || player.fieldPosition === player.position) return 1;
-  const nat = player.position;
-  const field = player.fieldPosition;
+  if (!player.fieldPosition) return 1;
+  const natGroup = POSITION_GROUP[player.position];
+  const fieldGroup = player.fieldPosition as PositionGroup; // slotsFor devuelve PositionGroup
+  if (natGroup === fieldGroup) return 1;
   // Arquero vs campo: siempre penalización máxima
-  if (nat === "GK" || field === "GK") return 0.65;
+  if (natGroup === "GK" || fieldGroup === "GK") return 0.65;
   // Puestos de campo: por distancia en la línea DEF-MID-FWD
-  const order: Position[] = ["DEF", "MID", "FWD"];
-  const dist = Math.abs(order.indexOf(nat) - order.indexOf(field));
+  const order: PositionGroup[] = ["DEF", "MID", "FWD"];
+  const dist = Math.abs(order.indexOf(natGroup) - order.indexOf(fieldGroup));
   if (dist === 1) return 0.88; // vecinos
   return 0.75; // dist === 2: extremos
 }
@@ -119,6 +122,7 @@ function teamStrength(team: Team): { attack: number; defense: number; overall: n
 
   // Nivel de Ataque: FWD + MID en cancha — combinación de creación (Pase+Velocidad)
   // y remate (Tiro+Regate). Los creadores dan profundidad, los rematadores definen.
+  // fieldPosition contiene el PositionGroup del slot (GK/DEF/MID/FWD).
   const atkLine = onField.filter((p) => p.fieldPosition === "FWD" || p.fieldPosition === "MID");
   const defLine = onField.filter((p) => p.fieldPosition === "DEF" || p.fieldPosition === "GK");
 
@@ -160,7 +164,7 @@ export function previewStrength(team: Team): { attack: number; defense: number }
   const starters = team.starting
     .map((id, i) => {
       const p = team.squad.find((pp) => pp.id === id);
-      return p ? { ...p, fieldPosition: formSlots[i] as Position } : null;
+      return p ? { ...p, fieldPosition: formSlots[i] } : null;
     })
     .filter(Boolean) as Player[];
   if (starters.length === 0) return { attack: 50, defense: 50 };
@@ -305,7 +309,7 @@ export function tickMinute(state: MatchState): MatchEvent[] {
     // Falta / amarilla
     const teamIdx = rand() < 0.5 ? 0 : 1;
     const team = state.teams[teamIdx];
-    const fouler = pick(team.squad.filter((p) => p.onField && !p.redCarded && p.position !== "GK"));
+      const fouler = pick(team.squad.filter((p) => p.onField && !p.redCarded && p.position !== "POR"));
     if (fouler) {
       newEvents.push(C.foulEv(state.minute, fouler.name));
       team.fouls += 1;

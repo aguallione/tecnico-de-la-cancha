@@ -1,4 +1,5 @@
-import type { Player, Position, Team } from "./types";
+import type { Player, Position, PositionGroup, Team } from "./types";
+import { POSITION_GROUP } from "./types";
 
 /**
  * =========================================================================
@@ -24,8 +25,8 @@ export interface RoleEffect {
   attack: number;
   /** Ajuste al aporte del jugador al Nivel de Defensa del equipo. */
   defense: number;
-  /** Posición base a la que aplica el rol. */
-  position: Position;
+  /** Grupo lógico de posición al que aplica el rol (GK/DEF/MID/FWD). */
+  position: PositionGroup;
   /** Subgrupo dentro de la posición (ej. Lateral / Central para defensores). */
   group?: string;
   /** Descripción corta del efecto para mostrar en la UI. */
@@ -97,9 +98,16 @@ export function roleEffect(roleName: string | undefined): { attack: number; defe
   return { attack: e.attack, defense: e.defense };
 }
 
-/** Lista ordenada de roles disponibles para una posición (vacía para GK). */
-export function rolesForPosition(pos: Position): string[] {
-  return Object.keys(ROLE_TABLE).filter((k) => ROLE_TABLE[k].position === pos);
+/**
+ * Lista ordenada de roles disponibles para una posición específica.
+ * Convierte la posición específica a su grupo lógico y filtra los roles.
+ * Vacío para POR (arquero).
+ */
+export function rolesForPosition(pos: Position | PositionGroup): string[] {
+  const group: PositionGroup = pos in POSITION_GROUP
+    ? POSITION_GROUP[pos as Position]
+    : pos as PositionGroup;
+  return Object.keys(ROLE_TABLE).filter((k) => ROLE_TABLE[k].position === group);
 }
 
 /** Subgrupo de un rol (ej. "Lateral" / "Central"), si aplica. */
@@ -121,12 +129,10 @@ export function teamTacticalAdjustment(
   let atk = 0;
   let def = 0;
   for (const p of onFieldStarters) {
-    // Un rol solo aporta si corresponde a la posición que el jugador ocupa EN CANCHA.
-    // Así, si alguien cambia de puesto, un rol viejo incompatible se ignora
-    // automáticamente y la UI (que muestra roles por posición de cancha) nunca
-    // queda desincronizada del cálculo del motor.
+    // Un rol solo aporta si corresponde al grupo de la posición que el jugador ocupa EN CANCHA.
+    // fieldPosition contiene el PositionGroup del slot (GK/DEF/MID/FWD).
     const e = p.individualRole ? ROLE_TABLE[p.individualRole] : undefined;
-    if (!e || e.position !== p.fieldPosition) continue;
+    if (!e || e.position !== (p.fieldPosition as PositionGroup)) continue;
     atk += e.attack;
     def += e.defense;
   }

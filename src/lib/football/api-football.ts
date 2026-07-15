@@ -8,6 +8,7 @@
  */
 
 import type { Player, Position } from "./types";
+import { POSITION_GROUP } from "./types";
 import { uid } from "./players";
 
 const BASE_URL = "https://v3.football.api-sports.io";
@@ -36,15 +37,15 @@ interface ApiPlayer {
 
 // ─── Mapeos ────────────────────────────────────────────────────────────────────
 
-/** Traduce la posición de la API al tipo Position del juego. */
+/** Traduce la posición de la API al tipo Position del juego (posiciones específicas). */
 function mapPosition(apiPos: string | null | undefined): Position {
-  if (!apiPos) return "MID";
+  if (!apiPos) return "MC";
   const p = apiPos.toLowerCase();
-  if (p.includes("goalkeeper") || p === "g") return "GK";
-  if (p.includes("defender") || p === "d") return "DEF";
-  if (p.includes("midfielder") || p === "m") return "MID";
-  if (p.includes("attacker") || p.includes("forward") || p === "f") return "FWD";
-  return "MID";
+  if (p.includes("goalkeeper") || p === "g") return "POR";
+  if (p.includes("defender") || p === "d") return "DFC";
+  if (p.includes("midfielder") || p === "m") return "MC";
+  if (p.includes("attacker") || p.includes("forward") || p === "f") return "DC";
+  return "MC";
 }
 
 /**
@@ -55,13 +56,14 @@ function mapPosition(apiPos: string | null | undefined): Position {
 function deriveAttributes(pos: Position, overall: number) {
   const jitter = () => Math.floor(Math.random() * 13) - 6; // ±6
   let passing = overall + jitter();
-  let shooting = overall + jitter()
+  let shooting = overall + jitter();
   let dribbling = overall + jitter();
   let defense = overall + jitter();
   let physical = overall + jitter();
   let pace = overall + jitter();
 
-  switch (pos) {
+  const group = POSITION_GROUP[pos];
+  switch (group) {
     case "GK":
       defense += 12; shooting -= 25; pace -= 8; passing -= 6; dribbling -= 18; physical += 4;
       break;
@@ -77,7 +79,7 @@ function deriveAttributes(pos: Position, overall: number) {
   }
 
   const clamp = (n: number) => Math.max(30, Math.min(99, n));
-  return {
+  const base6 = {
     passing: clamp(passing),
     shooting: clamp(shooting),
     dribbling: clamp(dribbling),
@@ -85,6 +87,17 @@ function deriveAttributes(pos: Position, overall: number) {
     physical: clamp(physical),
     pace: clamp(pace),
   };
+  if (group === "GK") {
+    return {
+      ...base6,
+      gkDiving: clamp(overall + Math.round(Math.random() * 10 - 4)),
+      gkHandling: clamp(overall + Math.round(Math.random() * 10 - 4)),
+      gkKicking: clamp(overall + Math.round(Math.random() * 8 - 5)),
+      gkReflexes: clamp(overall + Math.round(Math.random() * 10 - 4)),
+      gkPositioning: clamp(overall + Math.round(Math.random() * 8 - 3)),
+    };
+  }
+  return base6;
 }
 
 /** Convierte el rating string de la API ("7.45") en un overall 30–99. */
@@ -188,10 +201,18 @@ export async function fetchSquad(
     );
   }
 
-  // Asegurar distribución mínima (al menos 1 GK)
-  const hasGK = players.some((p) => p.position === "GK");
+  // Asegurar distribución mínima (al menos 1 POR)
+  const hasGK = players.some((p) => p.position === "POR");
   if (!hasGK && players.length > 0) {
-    players[0].position = "GK";
+    players[0].position = "POR";
+    if (!players[0].gkDiving) {
+      const gkOverall = players[0].overall;
+      players[0].gkDiving = Math.max(1, Math.min(99, gkOverall + Math.round(Math.random() * 10 - 4)));
+      players[0].gkHandling = Math.max(1, Math.min(99, gkOverall + Math.round(Math.random() * 10 - 4)));
+      players[0].gkKicking = Math.max(1, Math.min(99, gkOverall + Math.round(Math.random() * 8 - 5)));
+      players[0].gkReflexes = Math.max(1, Math.min(99, gkOverall + Math.round(Math.random() * 10 - 4)));
+      players[0].gkPositioning = Math.max(1, Math.min(99, gkOverall + Math.round(Math.random() * 8 - 3)));
+    }
   }
 
   return players.sort((a, b) => b.overall - a.overall);

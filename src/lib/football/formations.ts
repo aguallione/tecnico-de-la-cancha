@@ -1,4 +1,5 @@
-import type { FormationName, Position } from "./types";
+import type { FormationName, Position, PositionGroup } from "./types";
+import { POSITION_GROUP } from "./types";
 
 export const FORMATIONS: Record<FormationName, { GK: number; DEF: number; MID: number; FWD: number }> = {
   "4-4-2": { GK: 1, DEF: 4, MID: 4, FWD: 2 },
@@ -11,14 +12,23 @@ export const FORMATIONS: Record<FormationName, { GK: number; DEF: number; MID: n
 
 export const FORMATION_LIST: FormationName[] = ["4-4-2", "4-3-3", "3-5-2", "4-2-3-1", "5-3-2", "3-4-3"];
 
-export function slotsFor(f: FormationName): Position[] {
+/**
+ * Devuelve los GRUPOS lógicos (GK/DEF/MID/FWD) para cada slot de la formación.
+ * El engine y el locker los usan para saber si un jugador está fuera de posición.
+ */
+export function slotsFor(f: FormationName): PositionGroup[] {
   const s = FORMATIONS[f];
-  const arr: Position[] = [];
+  const arr: PositionGroup[] = [];
   for (let i = 0; i < s.GK; i++) arr.push("GK");
   for (let i = 0; i < s.DEF; i++) arr.push("DEF");
   for (let i = 0; i < s.MID; i++) arr.push("MID");
   for (let i = 0; i < s.FWD; i++) arr.push("FWD");
   return arr;
+}
+
+/** Convierte una posición específica a su grupo lógico. */
+export function positionGroup(pos: Position): PositionGroup {
+  return POSITION_GROUP[pos];
 }
 
 // Ventaja piedra-papel-tijera simple entre formaciones (retorna -0.1 a 0.1)

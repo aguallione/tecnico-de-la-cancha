@@ -17,23 +17,27 @@ import type {
   LineHeight,
   Player,
   Position,
+  PositionGroup,
   PressIntensity,
   Style,
   Team,
 } from "@/lib/football/types";
+import { POSITION_GROUP } from "@/lib/football/types";
 
 const POSITION_LABEL: Record<Position, string> = {
-  GK: "Arquero",
-  DEF: "Defensor",
-  MID: "Mediocampista",
-  FWD: "Delantero",
+  POR: "Arquero",
+  DFC: "Def. Central", LI: "Lateral Izq.", LD: "Lateral Der.", CAI: "Carrilero Izq.", CAD: "Carrilero Der.",
+  MCD: "Med. Defensivo", MC: "Med. Central", MI: "Med. Izquierdo", MD: "Med. Derecho", MCO: "Med. Ofensivo",
+  DC: "Del. Centro", SD: "Segundo Del.", EI: "Extremo Izq.", ED: "Extremo Der.",
 };
-const POSITION_SHORT: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
+const POSITION_SHORT: Record<Position, string> = {
+  POR: "POR",
+  DFC: "DFC", LI: "LI", LD: "LD", CAI: "CAI", CAD: "CAD",
+  MCD: "MCD", MC: "MC", MI: "MI", MD: "MD", MCO: "MCO",
+  DC: "DC", SD: "SD", EI: "EI", ED: "ED",
+};
+const GROUP_SHORT: Record<PositionGroup, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
 const avg = (a: number[]) => (a.length ? a.reduce((s, n) => s + n, 0) / a.length : 0);
-
-const POSITION_LABEL_SHORT: Record<Position, string> = {
-  GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL",
-};
 
 export function LockerScreen() {
   const { setScreen, teams, activeLockerTeam, setActiveLockerTeam, settings, setTeams } = useGame();
@@ -82,13 +86,13 @@ export function LockerScreen() {
       setError("Faltan jugadores en la alineación.");
       return;
     }
-    const posMap: Record<Position, number> = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+    const groupMap: Record<PositionGroup, number> = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
     team.starting.forEach((id, i) => {
       const p = team.squad.find((pp) => pp.id === id);
-      const slot = slots[i];
-      if (p) posMap[slot] += 1;
+      const slotGroup = slots[i]; // slots es PositionGroup[]
+      if (p) groupMap[slotGroup] += 1;
     });
-    if (posMap.GK < 1) {
+    if (groupMap.GK < 1) {
       setError("Falta el arquero en la alineación.");
       return;
     }
@@ -209,7 +213,7 @@ export function LockerScreen() {
           style={{ minHeight: 420 }}>
           <PitchLines />
           <div className="relative z-10 grid grid-rows-4 h-[420px] p-3 gap-1">
-            {(["FWD", "MID", "DEF", "GK"] as Position[]).map((row) => (
+            {(["FWD", "MID", "DEF", "GK"] as PositionGroup[]).map((row) => (
               <SlotRow key={row} team={team} slots={slots} rowPos={row} onSwap={swapSlot} seeOwnRatings={seeOwnRatings} />
             ))}
           </div>
@@ -219,12 +223,13 @@ export function LockerScreen() {
         {(() => {
           const starters = team.starting.map((pid, i) => ({
             p: team.squad.find((pp) => pp.id === pid),
-            pos: slots[i],
+            group: slots[i], // PositionGroup del slot
           })).filter((s) => s.p);
-          const oopList = starters.filter((s) => s.p!.position !== s.pos);
+          // Fuera de posición = el grupo natural del jugador no coincide con el slot
+          const oopList = starters.filter((s) => POSITION_GROUP[s.p!.position] !== s.group);
           if (oopList.length === 0) return null;
               const baseAvg = Math.round(avg(starters.map((s) => s.p!.overall)));
-              const effAvg = Math.round(avg(starters.map((s) => s.p!.overall * outOfPositionFactor({ ...s.p!, fieldPosition: s.pos }))));
+              const effAvg = Math.round(avg(starters.map((s) => s.p!.overall * outOfPositionFactor({ ...s.p!, fieldPosition: s.group }))));
               return (
                 <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3">
                   <div className="flex items-center gap-2 text-sm font-semibold text-red-300">
@@ -238,7 +243,7 @@ export function LockerScreen() {
                     )}
                   </div>
               <div className="mt-1 text-xs text-red-200/70">
-                {oopList.map((s) => `${s.p!.name} (${POSITION_SHORT[s.p!.position]}→${POSITION_SHORT[s.pos]})`).join(" · ")}
+                {oopList.map((s) => `${s.p!.name} (${POSITION_SHORT[s.p!.position]}→${GROUP_SHORT[s.group]})`).join(" · ")}
               </div>
             </div>
           );
@@ -308,15 +313,15 @@ function RoleEffectBadge({ role }: { role: string | undefined }) {
 }
 
 function IndividualRoles({ team, slots, onChange }: {
-  team: Team; slots: Position[]; onChange: () => void;
+  team: Team; slots: PositionGroup[]; onChange: () => void;
 }) {
-  // Titulares en el orden de la alineación, con su posición EN CANCHA (slot).
+  // Titulares en el orden de la alineación, con su grupo de posición EN CANCHA (slot).
   const starters = team.starting
     .map((id, i) => {
       const p = team.squad.find((pp) => pp.id === id);
-      return p ? { p, fieldPos: slots[i] } : null;
+      return p ? { p, fieldGroup: slots[i] } : null;
     })
-    .filter(Boolean) as Array<{ p: Player; fieldPos: Position }>;
+    .filter(Boolean) as Array<{ p: Player; fieldGroup: PositionGroup }>;
 
   return (
     <div className="mt-6">
@@ -325,18 +330,18 @@ function IndividualRoles({ team, slots, onChange }: {
         Ajustan levemente el aporte de cada jugador al Nivel de Ataque o Defensa del equipo.
       </p>
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
-        {starters.map(({ p, fieldPos }) => {
-          const roles = rolesForPosition(fieldPos);
+        {starters.map(({ p, fieldGroup }) => {
+          const roles = rolesForPosition(fieldGroup);
           const groups = Array.from(
             new Set(roles.map((r) => ROLE_TABLE[r].group ?? "")),
           );
-          // El rol solo cuenta si corresponde a la posición de cancha actual.
+          // El rol solo cuenta si corresponde al grupo de la posición de cancha actual.
           const currentRole = roles.includes(p.individualRole || "") ? p.individualRole : "";
           return (
             <div key={p.id} className="card px-3 py-2 flex items-center justify-between gap-3 text-sm">
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">
-                  {p.name} <span className="text-xs text-muted-foreground">({POSITION_SHORT[fieldPos]})</span>
+                  {p.name} <span className="text-xs text-muted-foreground">({POSITION_SHORT[p.position]})</span>
                 </div>
                 {roles.length > 0 ? (
                   <select
@@ -380,7 +385,7 @@ function IndividualRoles({ team, slots, onChange }: {
 }
 
 function SlotRow({ team, slots, rowPos, onSwap, seeOwnRatings }: {
-  team: Team; slots: Position[]; rowPos: Position;
+  team: Team; slots: PositionGroup[]; rowPos: PositionGroup;
   onSwap: (slotIndex: number, newPlayerId: string) => void;
   seeOwnRatings: boolean;
 }) {
@@ -388,25 +393,25 @@ function SlotRow({ team, slots, rowPos, onSwap, seeOwnRatings }: {
   return (
     <div className="flex items-center justify-around gap-2">
       {indexes.map((i) => (
-        <SlotChip key={i} team={team} slotIndex={i} onSwap={onSwap} slotPos={slots[i]} seeOwnRatings={seeOwnRatings} />
+        <SlotChip key={i} team={team} slotIndex={i} onSwap={onSwap} slotGroup={slots[i]} seeOwnRatings={seeOwnRatings} />
       ))}
     </div>
   );
 }
 
-function SlotChip({ team, slotIndex, slotPos, onSwap, seeOwnRatings }: {
-  team: Team; slotIndex: number; slotPos: Position;
+function SlotChip({ team, slotIndex, slotGroup, onSwap, seeOwnRatings }: {
+  team: Team; slotIndex: number; slotGroup: PositionGroup;
   onSwap: (slotIndex: number, newPlayerId: string) => void;
   seeOwnRatings: boolean;
 }) {
   const id = team.starting[slotIndex];
   const p = team.squad.find((pp) => pp.id === id);
-  const factor = p ? outOfPositionFactor({ ...p, fieldPosition: slotPos }) : 1;
+  const factor = p ? outOfPositionFactor({ ...p, fieldPosition: slotGroup }) : 1;
   const oop = p && factor < 1;
   const effective = p ? Math.round(p.overall * factor) : 0;
   return (
     <label className="relative flex flex-col items-center text-center max-w-[9rem]">
-      <span className="text-[10px] uppercase tracking-wider text-lime-200/80">{POSITION_SHORT[slotPos]}</span>
+      <span className="text-[10px] uppercase tracking-wider text-lime-200/80">{GROUP_SHORT[slotGroup]}</span>
       <select
         value={id ?? ""}
         onChange={(e) => onSwap(slotIndex, e.target.value)}
@@ -429,14 +434,14 @@ function SlotChip({ team, slotIndex, slotPos, onSwap, seeOwnRatings }: {
               </span>
               <span className="text-[10px] font-bold text-lime-100/90">{p.overall}</span>
               {oop && (
-                <span className="text-[10px] font-bold text-red-400" title={`Fuera de posición: ${POSITION_LABEL[p.position]} jugando de ${POSITION_LABEL[slotPos]}`}>
+                <span className="text-[10px] font-bold text-red-400" title={`Fuera de posición: ${POSITION_LABEL[p.position]} en slot ${GROUP_SHORT[slotGroup]}`}>
                   → {effective}
                 </span>
               )}
             </>
           ) : (
             oop && (
-              <span className="text-[10px] font-bold text-red-400" title={`Fuera de posición: ${POSITION_LABEL[p.position]} jugando de ${POSITION_LABEL[slotPos]}`}>
+              <span className="text-[10px] font-bold text-red-400" title={`Fuera de posición: ${POSITION_LABEL[p.position]} en slot ${GROUP_SHORT[slotGroup]}`}>
                 ⚠ Fuera de pos.
               </span>
             )
@@ -490,7 +495,7 @@ function RivalSquadSection({
                 <div className="min-w-0">
                   <div className="truncate font-medium">{p.name}</div>
                   <div className="text-xs text-muted-foreground">
-                    {POSITION_LABEL_SHORT[p.position]} · {p.age} años
+                    {POSITION_SHORT[p.position]} · {p.age} años
                     {isStarter ? "" : " · Suplente"}
                   </div>
                 </div>

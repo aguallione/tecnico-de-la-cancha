@@ -1,24 +1,25 @@
 import { FORMATION_LIST, FORMATIONS, slotsFor } from "./formations";
-import type { FormationName, Player, Position, Team } from "./types";
+import type { FormationName, Player, PositionGroup, Team } from "./types";
+import { POSITION_GROUP } from "./types";
 
 /**
  * Elige mejor alineación para una formación dada.
  * Devuelve array de 11 player ids ordenados según slotsFor(formation).
- * Si no hay suficientes jugadores para una posición, rellena con los mejores restantes.
+ * Agrupa jugadores por su grupo lógico (GK/DEF/MID/FWD).
+ * Si no hay suficientes jugadores para un grupo, rellena con los mejores restantes.
  */
 export function autoLineup(squad: Player[], formation: FormationName): string[] {
-  const need = FORMATIONS[formation];
-  const byPos: Record<Position, Player[]> = {
+  const byGroup: Record<PositionGroup, Player[]> = {
     GK: [], DEF: [], MID: [], FWD: [],
   };
   const sorted = [...squad].sort((a, b) => b.overall - a.overall);
-  for (const p of sorted) byPos[p.position].push(p);
+  for (const p of sorted) byGroup[POSITION_GROUP[p.position]].push(p);
 
   const used = new Set<string>();
-  const slots = slotsFor(formation);
+  const slots = slotsFor(formation); // devuelve PositionGroup[]
   const result: string[] = [];
-  for (const pos of slots) {
-    const cand = byPos[pos].find((p) => !used.has(p.id));
+  for (const group of slots) {
+    const cand = byGroup[group].find((p) => !used.has(p.id));
     if (cand) {
       used.add(cand.id);
       result.push(cand.id);

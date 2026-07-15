@@ -17,6 +17,7 @@ import { useRef, useState } from "react";
 import { Trash2, RefreshCw, LogIn, Plus } from "lucide-react";
 import type { Player } from "@/lib/football/types";
 import { generateSquad } from "@/lib/football/players";
+import { migrateSquadFull } from "@/lib/football/migration";
 import { searchTeams, fetchSquad } from "@/lib/football/api-football";
 import { useEquiposGuardados } from "@/hooks/use-equipos-guardados";
 import { useAuth } from "@/hooks/use-auth";

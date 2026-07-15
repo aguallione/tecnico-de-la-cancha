@@ -22,6 +22,7 @@
 import { useState, useMemo } from "react";
 import { uid } from "@/lib/football/players";
 import type { Player, Position } from "@/lib/football/types";
+import { POSITION_GROUP } from "@/lib/football/types";
 
 interface Props {
   onPlayerCreated: (player: Player) => void;
@@ -37,28 +38,61 @@ const ATTRS: { key: keyof Pick<Player, "passing" | "shooting" | "dribbling" | "d
   { key: "pace", label: "Velocidad", short: "VEL" },
 ];
 
-const POSITIONS: Position[] = ["GK", "DEF", "MID", "FWD"];
+const GK_ATTRS: { key: keyof Pick<Player, "gkDiving" | "gkHandling" | "gkKicking" | "gkReflexes" | "gkPositioning">; label: string; short: string }[] = [
+  { key: "gkDiving", label: "Estirada", short: "DIV" },
+  { key: "gkHandling", label: "Paradas", short: "PAR" },
+  { key: "gkKicking", label: "Saque", short: "SAC" },
+  { key: "gkReflexes", label: "Reflejos", short: "REF" },
+  { key: "gkPositioning", label: "Colocación", short: "POS" },
+];
+
+/** Grupos de posiciones para mostrar en el selector */
+const POSITION_GROUPS: { label: string; positions: Position[] }[] = [
+  { label: "Delantero", positions: ["DC", "SD", "EI", "ED"] },
+  { label: "Mediocampista", positions: ["MCO", "MC", "MI", "MD", "MCD"] },
+  { label: "Defensor", positions: ["DFC", "LI", "LD", "CAI", "CAD"] },
+  { label: "Arquero", positions: ["POR"] },
+];
+
+const POSITIONS: Position[] = [
+  "DC", "SD", "EI", "ED",
+  "MCO", "MC", "MI", "MD", "MCD",
+  "DFC", "LI", "LD", "CAI", "CAD",
+  "POR",
+];
 
 const POS_LABEL: Record<Position, string> = {
-  GK: "Arquero",
-  DEF: "Defensor",
-  MID: "Mediocampista",
-  FWD: "Delantero",
+  DC: "Delantero Centro",
+  SD: "Segundo Delantero",
+  EI: "Extremo Izquierdo",
+  ED: "Extremo Derecho",
+  MCO: "Mediocampista Ofensivo",
+  MC: "Mediocampista Central",
+  MI: "Mediocampista Izquierdo",
+  MD: "Mediocampista Derecho",
+  MCD: "Mediocampista Defensivo",
+  DFC: "Defensor Central",
+  LI: "Lateral Izquierdo",
+  LD: "Lateral Derecho",
+  CAI: "Carrilero Izquierdo",
+  CAD: "Carrilero Derecho",
+  POR: "Arquero",
 };
 
 export function CreatePlayerScreen({ onPlayerCreated, onCancel }: Props) {
   const [name, setName] = useState("");
-  const [position, setPosition] = useState<Position>("MID");
+  const [position, setPosition] = useState<Position>("MC");
   const [age, setAge] = useState(25);
   const [objetivo, setObjetivo] = useState(75);
   const [attrs, setAttrs] = useState<Record<string, number>>({
-    passing: 75,
-    shooting: 75,
-    dribbling: 75,
-    defense: 75,
-    physical: 75,
-    pace: 75,
+    passing: 75, shooting: 75, dribbling: 75, defense: 75, physical: 75, pace: 75,
   });
+  const [gkAttrs, setGkAttrs] = useState<Record<string, number>>({
+    gkDiving: 75, gkHandling: 75, gkKicking: 70, gkReflexes: 75, gkPositioning: 73,
+  });
+
+  const isPOR = position === "POR";
+  const group = POSITION_GROUP[position];
 
   const overall = useMemo(
     () => Math.round((attrs.passing + attrs.shooting + attrs.dribbling + attrs.defense + attrs.physical + attrs.pace) / 6),
@@ -79,31 +113,48 @@ export function CreatePlayerScreen({ onPlayerCreated, onCancel }: Props) {
     setAttrs((prev) => ({ ...prev, [key]: clamped }));
   }
 
+  function ajustarGkAttr(key: string, valor: number) {
+    const clamped = Math.max(1, Math.min(99, Math.round(valor)));
+    setGkAttrs((prev) => ({ ...prev, [key]: clamped }));
+  }
+
   function autoRepartir() {
-    // Repartir el presupuesto equitativamente con pequeña variación por posición
     const base = Math.floor(presupuesto / 6);
     const resto = presupuesto - base * 6;
     const distribuir: Record<string, number> = {};
     const orden = [...ATTRS.map((a) => a.key)];
 
-    // Bonus por posición: atributos clave reciben +, otros -
-    const bonus: Record<Position, Record<string, number>> = {
+    // Bonus por grupo lógico de posición
+    type BonusMap = Record<string, number>;
+    const bonusByGroup: Record<string, BonusMap> = {
       GK: { defense: 12, physical: 4, shooting: -25, dribbling: -18, pace: -8, passing: -6 },
       DEF: { defense: 10, physical: 2, shooting: -10, dribbling: -6, passing: -2, pace: 0 },
       MID: { passing: 6, dribbling: 2, shooting: 0, defense: 0, physical: 0, pace: 0 },
       FWD: { shooting: 10, dribbling: 8, pace: 4, passing: 2, defense: -10, physical: 0 },
     };
+    const bonus = bonusByGroup[group] ?? {};
 
     for (const key of orden) {
-      const val = base + (bonus[position][key] ?? 0);
+      const val = base + (bonus[key] ?? 0);
       distribuir[key] = Math.max(1, Math.min(99, val));
     }
-    // Distribuir el resto en atributos clave
-    const claveIdx = orden.findIndex((k) => Math.abs(bonus[position][k] ?? 0) > 5);
+    const claveIdx = orden.findIndex((k) => Math.abs(bonus[k] ?? 0) > 5);
     if (claveIdx >= 0 && resto > 0) {
       distribuir[orden[claveIdx]] = Math.min(99, distribuir[orden[claveIdx]] + resto);
     }
     setAttrs(distribuir);
+
+    // Si es arquero, auto-repartir atributos GK también
+    if (isPOR) {
+      const gkBase = objetivo;
+      setGkAttrs({
+        gkDiving: Math.max(1, Math.min(99, gkBase + Math.round(Math.random() * 8 - 3))),
+        gkHandling: Math.max(1, Math.min(99, gkBase + Math.round(Math.random() * 8 - 3))),
+        gkKicking: Math.max(1, Math.min(99, gkBase + Math.round(Math.random() * 6 - 4))),
+        gkReflexes: Math.max(1, Math.min(99, gkBase + Math.round(Math.random() * 8 - 3))),
+        gkPositioning: Math.max(1, Math.min(99, gkBase + Math.round(Math.random() * 6 - 3))),
+      });
+    }
   }
 
   function guardar() {
@@ -125,6 +176,13 @@ export function CreatePlayerScreen({ onPlayerCreated, onCancel }: Props) {
       redCarded: false,
       yellowCards: 0,
       injured: false,
+      ...(isPOR ? {
+        gkDiving: gkAttrs.gkDiving,
+        gkHandling: gkAttrs.gkHandling,
+        gkKicking: gkAttrs.gkKicking,
+        gkReflexes: gkAttrs.gkReflexes,
+        gkPositioning: gkAttrs.gkPositioning,
+      } : {}),
     };
     onPlayerCreated(player);
   }
@@ -145,16 +203,21 @@ export function CreatePlayerScreen({ onPlayerCreated, onCancel }: Props) {
         </div>
         <div>
           <label className="label">Posición</label>
-          <div className="flex gap-1 mt-1">
-            {POSITIONS.map((pos) => (
-              <button
-                key={pos}
-                onClick={() => setPosition(pos)}
-                data-active={position === pos}
-                className="chip flex-1"
-              >
-                {pos}
-              </button>
+          <div className="mt-1 space-y-1">
+            {POSITION_GROUPS.map((g) => (
+              <div key={g.label} className="flex gap-1 flex-wrap">
+                <span className="text-[10px] text-muted-foreground w-full">{g.label}</span>
+                {g.positions.map((pos) => (
+                  <button
+                    key={pos}
+                    onClick={() => setPosition(pos)}
+                    data-active={position === pos}
+                    className="chip"
+                  >
+                    {pos}
+                  </button>
+                ))}
+              </div>
             ))}
           </div>
           <p className="text-[10px] text-muted-foreground mt-1">{POS_LABEL[position]}</p>
@@ -216,6 +279,27 @@ export function CreatePlayerScreen({ onPlayerCreated, onCancel }: Props) {
           </div>
         ))}
       </div>
+
+      {/* Atributos exclusivos de arquero */}
+      {isPOR && (
+        <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Atributos de Arquero</div>
+          {GK_ATTRS.map((attr) => (
+            <div key={attr.key} className="grid grid-cols-[3rem_1fr_2.5rem] items-center gap-2">
+              <span className="text-xs font-bold text-muted-foreground">{attr.short}</span>
+              <input
+                type="range"
+                min={1}
+                max={99}
+                value={gkAttrs[attr.key]}
+                onChange={(e) => ajustarGkAttr(attr.key, Number(e.target.value))}
+                className="w-full"
+              />
+              <span className="text-sm font-bold text-center tabular-nums">{gkAttrs[attr.key]}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* General resultante */}
       <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 p-3">

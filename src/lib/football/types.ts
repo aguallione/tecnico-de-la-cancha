@@ -1,4 +1,27 @@
-export type Position = "GK" | "DEF" | "MID" | "FWD";
+/**
+ * 15 posiciones específicas del sistema nuevo.
+ * Categorías lógicas (para formaciones, engine, etc.):
+ *   POR              → arquero
+ *   DFC, LI, LD, CAI, CAD  → defensores
+ *   MCD, MC, MI, MD, MCO   → mediocampistas
+ *   DC, SD, EI, ED         → delanteros
+ */
+export type Position =
+  | "POR"
+  | "DFC" | "LI" | "LD" | "CAI" | "CAD"
+  | "MCD" | "MC" | "MI" | "MD" | "MCO"
+  | "DC" | "SD" | "EI" | "ED";
+
+/** Las 4 categorías lógicas que usa el motor internamente. */
+export type PositionGroup = "GK" | "DEF" | "MID" | "FWD";
+
+/** Mapea cada posición específica a su grupo lógico. */
+export const POSITION_GROUP: Record<Position, PositionGroup> = {
+  POR: "GK",
+  DFC: "DEF", LI: "DEF", LD: "DEF", CAI: "DEF", CAD: "DEF",
+  MCD: "MID", MC: "MID", MI: "MID", MD: "MID", MCO: "MID",
+  DC: "FWD", SD: "FWD", EI: "FWD", ED: "FWD",
+};
 export type Style = "Ofensivo" | "Equilibrado" | "Defensivo";
 export type FormationName = "4-4-2" | "4-3-3" | "3-5-2" | "4-2-3-1" | "5-3-2" | "3-4-3";
 // Parámetros tácticos avanzados (ver src/lib/football/tactics.ts para sus efectos)
@@ -19,6 +42,12 @@ export interface Player {
   physical: number;  // Físico
   pace: number;      // Velocidad
   age: number;
+  // Atributos exclusivos de arquero (POR). Solo presentes cuando position === "POR".
+  gkDiving?: number;    // Estirada (DIV) 1-99
+  gkHandling?: number;  // Paradas (PAR) 1-99
+  gkKicking?: number;   // Saque (SAC) 1-99
+  gkReflexes?: number;  // Reflejos (REF) 1-99
+  gkPositioning?: number; // Colocación (POS) 1-99
   // Reservados para uso futuro
   nationality?: string;
   historicClub?: string;
