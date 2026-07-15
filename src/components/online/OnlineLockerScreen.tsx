@@ -140,7 +140,7 @@ function LockerInner({
     const starters = team.squad.filter((p) => team.starting.includes(p.id));
     if (!team.captainId || !starters.some((p) => p.id === team.captainId)) team.captainId = starters[0]?.id;
     if (!team.penaltyTakerId || !starters.some((p) => p.id === team.penaltyTakerId))
-      team.penaltyTakerId = [...starters].sort((a, b) => b.attack - a.attack)[0]?.id;
+      team.penaltyTakerId = [...starters].sort((a, b) => b.shooting - a.shooting)[0]?.id;
     if (!team.setPieceTakerId) team.setPieceTakerId = team.penaltyTakerId;
     rerender();
   }

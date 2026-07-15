@@ -43,6 +43,6 @@ export function autoBotTeam(team: Team): void {
   const starters = team.squad.filter((p) => team.starting.includes(p.id));
   const best = starters.reduce((a, b) => (a.overall > b.overall ? a : b));
   team.captainId = best.id;
-  team.penaltyTakerId = [...starters].sort((a, b) => b.attack - a.attack)[0].id;
+  team.penaltyTakerId = [...starters].sort((a, b) => b.shooting - a.shooting)[0].id;
   team.setPieceTakerId = team.penaltyTakerId;
 }

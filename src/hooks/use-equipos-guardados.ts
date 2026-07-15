@@ -12,12 +12,18 @@
  *   nombre      text  NOT NULL
  *   plantel     jsonb NOT NULL  ← array de Player serializado
  *   creado_en   timestamptz
+ *
+ * Migración transparente: al cargar equipos con la estructura vieja de 4
+ * atributos (attack/defense/physical/pace), se convierten automáticamente a
+ * la nueva estructura de 6 atributos (passing/shooting/dribbling/defense/
+ * physical/pace) usando migrateSquadIfNeeded.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 import type { Player } from "@/lib/football/types";
+import { migrateSquadIfNeeded } from "@/lib/football/migration";
 
 export interface EquipoGuardado {
   id: string;
@@ -62,7 +68,13 @@ export function useEquiposGuardados() {
       return;
     }
 
-    setState({ equipos: (data ?? []) as EquipoGuardado[], loading: false, error: null });
+    // Migrar planteles con estructura vieja (4 atributos) → nueva (6 atributos)
+    const equiposMigrados = (data ?? []).map((e) => ({
+      ...e,
+      plantel: migrateSquadIfNeeded(e.plantel as Player[]),
+    }));
+
+    setState({ equipos: equiposMigrados as EquipoGuardado[], loading: false, error: null });
   }, [user]);
 
   // Recargar cada vez que cambia el usuario (login / logout)
@@ -122,7 +134,7 @@ export function useEquiposGuardados() {
     [user],
   );
 
-  // ── Alternar visibilidad pública de un equipo propio ──────────────────────
+  // ── Alternar visibilidad pública de un equipo propio ─────────────────────
 
   const togglePublico = useCallback(
     async (id: string, esPublico: boolean): Promise<{ ok: boolean; error?: string }> => {

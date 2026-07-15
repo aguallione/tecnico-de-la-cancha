@@ -319,7 +319,7 @@ export function ManualScreen() {
             No controlás jugadores en cancha: sos el Director Técnico. Armás el equipo, elegís la táctica y tomás decisiones antes y durante el partido. El motor simula el partido y un relator cuenta todo.
           </Section>
           <Section title="Armado del equipo">
-            Al empezar tenés un plantel generado automáticamente con nombre, posición, puntaje general (1-99) y atributos (Ataque, Defensa, Físico, Velocidad). Elegí formación, alineación (el sistema propone una y podés reacomodar), estilo (Ofensivo/Equilibrado/Defensivo), pateador de penales, pateador de córners y capitán.
+            Al empezar tenés un plantel generado automáticamente con nombre, posición, puntaje general (1-99) y 6 atributos (Pase, Tiro, Regate, Defensa, Físico, Velocidad). Elegí formación, alineación (el sistema propone una y podés reacomodar), estilo (Ofensivo/Equilibrado/Defensivo), pateador de penales, pateador de córners y capitán.
           </Section>
           <Section title="Multijugador local">
             Cada jugador humano configura su equipo por turnos. Antes de cada armado se muestra una pantalla "Pasále el dispositivo" para no espiar la táctica rival.

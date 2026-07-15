@@ -24,18 +24,35 @@ function rand(min: number, max: number): number { return Math.floor(Math.random(
 
 function attributesFor(pos: Position, base: number) {
   const jitter = () => rand(-8, 8);
-  let attack = base + jitter();
+  let passing = base + jitter();
+  let shooting = base + jitter();
+  let dribbling = base + jitter();
   let defense = base + jitter();
   let physical = base + jitter();
   let pace = base + jitter();
   switch (pos) {
-    case "GK": defense += 6; attack -= 20; pace -= 6; break;
-    case "DEF": defense += 8; attack -= 8; break;
-    case "MID": /* balanced */ break;
-    case "FWD": attack += 8; defense -= 8; pace += 4; break;
+    case "GK":
+      defense += 12; shooting -= 25; pace -= 8; passing -= 6; dribbling -= 18; physical += 4;
+      break;
+    case "DEF":
+      defense += 10; shooting -= 10; dribbling -= 6; passing -= 2;
+      break;
+    case "MID":
+      passing += 6; dribbling += 2;
+      break;
+    case "FWD":
+      shooting += 10; dribbling += 8; defense -= 10; pace += 4; passing += 2;
+      break;
   }
   const clamp = (n: number) => Math.max(30, Math.min(99, n));
-  return { attack: clamp(attack), defense: clamp(defense), physical: clamp(physical), pace: clamp(pace) };
+  return {
+    passing: clamp(passing),
+    shooting: clamp(shooting),
+    dribbling: clamp(dribbling),
+    defense: clamp(defense),
+    physical: clamp(physical),
+    pace: clamp(pace),
+  };
 }
 
 export function generateSquad(size = 20): Player[] {
@@ -50,7 +67,9 @@ export function generateSquad(size = 20): Player[] {
   return positions.map((pos) => {
     const base = rand(55, 88);
     const attrs = attributesFor(pos, base);
-    const overall = Math.round((attrs.attack + attrs.defense + attrs.physical + attrs.pace) / 4);
+    const overall = Math.round(
+      (attrs.passing + attrs.shooting + attrs.dribbling + attrs.defense + attrs.physical + attrs.pace) / 6,
+    );
     const name = `${pick(FIRST)} ${pick(LAST)}`;
     return {
       id: uid(),

@@ -56,7 +56,7 @@ export function LockerScreen() {
     const starters = team.squad.filter((p) => team.starting.includes(p.id));
     if (!team.captainId || !starters.some((p) => p.id === team.captainId)) team.captainId = starters[0]?.id;
     if (!team.penaltyTakerId || !starters.some((p) => p.id === team.penaltyTakerId))
-      team.penaltyTakerId = [...starters].sort((a, b) => b.attack - a.attack)[0]?.id;
+      team.penaltyTakerId = [...starters].sort((a, b) => b.shooting - a.shooting)[0]?.id;
     if (!team.setPieceTakerId || !starters.some((p) => p.id === team.setPieceTakerId))
       team.setPieceTakerId = team.penaltyTakerId;
     setError(null);
@@ -425,7 +425,7 @@ function SlotChip({ team, slotIndex, slotPos, onSwap, seeOwnRatings }: {
           {seeOwnRatings ? (
             <>
               <span className="text-[10px] text-lime-100/70">
-                Físico {Math.round(p.physical)}
+                PAS {Math.round(p.passing)} TIR {Math.round(p.shooting)} REG {Math.round(p.dribbling)} DEF {Math.round(p.defense)} FIS {Math.round(p.physical)} VEL {Math.round(p.pace)}
               </span>
               <span className="text-[10px] font-bold text-lime-100/90">{p.overall}</span>
               {oop && (

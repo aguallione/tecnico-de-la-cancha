@@ -11,10 +11,13 @@ export interface Player {
   name: string;
   position: Position;
   overall: number;
-  attack: number;
-  defense: number;
-  physical: number;
-  pace: number;
+  // 6 atributos independientes (1-99)
+  passing: number;   // Pase
+  shooting: number;  // Tiro
+  dribbling: number; // Regate
+  defense: number;   // Defensa
+  physical: number;  // Físico
+  pace: number;      // Velocidad
   age: number;
   // Reservados para uso futuro
   nationality?: string;

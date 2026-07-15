@@ -2,26 +2,28 @@
 /**
  * SquadOriginSelector.tsx
  *
- * Selector del origen del plantel. Cuatro modos:
+ * Selector del origen del plantel. Cinco modos:
  *   1. "auto"    → generateSquad (sin cambios)
  *   2. "file"    → sube JSON → requiere sesión para guardar en Supabase
  *   3. "saved"   → lista equipos del usuario autenticado en Supabase
  *   4. "api"     → busca equipo real en API-Football
+ *   5. "create"  → crear jugadores manualmente uno por uno
  *
  * IMPORTANTE: 'use client' es obligatorio para que import.meta.env.VITE_*
  * esté disponible en SSR (TanStack Start).
  */
 
 import { useRef, useState } from "react";
-import { Trash2, RefreshCw, LogIn } from "lucide-react";
+import { Trash2, RefreshCw, LogIn, Plus } from "lucide-react";
 import type { Player } from "@/lib/football/types";
 import { generateSquad } from "@/lib/football/players";
 import { searchTeams, fetchSquad } from "@/lib/football/api-football";
 import { useEquiposGuardados } from "@/hooks/use-equipos-guardados";
 import { useAuth } from "@/hooks/use-auth";
 import { AuthModal } from "@/components/football/AuthModal";
+import { CreatePlayerScreen } from "@/components/football/CreatePlayerScreen";
 
-type OriginMode = "auto" | "file" | "saved" | "api";
+type OriginMode = "auto" | "file" | "saved" | "api" | "create";
 
 interface Props {
   onSquadReady: (squad: Player[]) => void;
@@ -56,21 +58,25 @@ function validateSquad(raw: unknown): Player[] {
       return Math.max(min, Math.min(max, Math.round(v)));
     };
 
-    const attack = toNum("attack", 30, 99, 65);
-    const defense = toNum("defense", 30, 99, 65);
-    const physical = toNum("physical", 30, 99, 65);
-    const pace = toNum("pace", 30, 99, 65);
+    const passing = toNum("passing", 1, 99, 65);
+    const shooting = toNum("shooting", 1, 99, 65);
+    const dribbling = toNum("dribbling", 1, 99, 65);
+    const defense = toNum("defense", 1, 99, 65);
+    const physical = toNum("physical", 1, 99, 65);
+    const pace = toNum("pace", 1, 99, 65);
     const overall =
       typeof p.overall === "number"
-        ? toNum("overall", 30, 99, 65)
-        : Math.round((attack + defense + physical + pace) / 4);
+        ? toNum("overall", 1, 99, 65)
+        : Math.round((passing + shooting + dribbling + defense + physical + pace) / 6);
 
     return {
       id: `file_${i}_${Date.now().toString(36)}`,
       name,
       position: pos as Player["position"],
       overall,
-      attack,
+      passing,
+      shooting,
+      dribbling,
       defense,
       physical,
       pace,
@@ -115,6 +121,7 @@ export function SquadOriginSelector({ onSquadReady }: Props) {
     { value: "file", label: "Desde archivo" },
     { value: "saved", label: "Mis equipos" },
     { value: "api", label: "Equipo real" },
+    { value: "create", label: "Crear jugador" },
   ];
 
   return (
@@ -123,8 +130,8 @@ export function SquadOriginSelector({ onSquadReady }: Props) {
         Origen del plantel
       </label>
 
-      {/* Selector de tabs — dos filas para que quepan en tarjetas angostas */}
-      <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
+      {/* Selector de tabs — grid de 2/3 columnas */}
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-1 rounded-lg bg-muted p-1">
         {tabs.map(({ value, label }) => (
           <button
             key={value}
@@ -152,6 +159,9 @@ export function SquadOriginSelector({ onSquadReady }: Props) {
       )}
       {mode === "api" && (
         <ApiMode onReady={setSquadLabel} onSquadReady={onSquadReady} />
+      )}
+      {mode === "create" && (
+        <CreateMode onReady={setSquadLabel} onSquadReady={onSquadReady} />
       )}
 
       {squadLabel && (
@@ -270,7 +280,7 @@ function FileMode({
       <p className="text-xs text-muted-foreground">
         Subí un JSON con el plantel. Cada jugador necesita:{" "}
         <code className="font-mono bg-muted px-1 rounded text-[10px]">
-          name, position, overall, attack, defense, physical, pace, age
+          name, position, overall, passing, shooting, dribbling, defense, physical, pace, age
         </code>
         .
       </p>
@@ -507,6 +517,82 @@ function SavedMode({
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+// ─── Modo crear jugador ────────────────────────────────────────────────────────
+
+function CreateMode({
+  onReady,
+  onSquadReady,
+}: {
+  onReady: (label: string) => void;
+  onSquadReady: (squad: Player[]) => void;
+}) {
+  const [squad, setSquad] = useState<Player[]>([]);
+
+  function handlePlayerCreated(player: Player) {
+    const newSquad = [...squad, player].sort((a, b) => b.overall - a.overall);
+    setSquad(newSquad);
+    onSquadReady(newSquad);
+    onReady(`Plantel creado a mano (${newSquad.length} jugador${newSquad.length !== 1 ? "es" : ""})`);
+  }
+
+  function handleRemove(id: string) {
+    const newSquad = squad.filter((p) => p.id !== id);
+    setSquad(newSquad);
+    onSquadReady(newSquad);
+    onReady(
+      newSquad.length > 0
+        ? `Plantel creado a mano (${newSquad.length} jugador${newSquad.length !== 1 ? "es" : ""})`
+        : null,
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Creá jugadores uno por uno: definí nombre, posición, edad, puntaje general objetivo y
+        repartí los 6 atributos. Necesitás al menos 11 jugadores.
+      </p>
+
+      <CreatePlayerScreen onPlayerCreated={handlePlayerCreated} onCancel={() => {}} />
+
+      {squad.length > 0 && (
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-foreground">
+              Jugadores creados ({squad.length})
+            </span>
+            {squad.length >= 11 ? (
+              <span className="text-xs text-primary">Plantel completo</span>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                Faltan {11 - squad.length} para llegar a 11
+              </span>
+            )}
+          </div>
+          <ul className="rounded-lg border border-border bg-background divide-y divide-border overflow-hidden max-h-48 overflow-y-auto">
+            {squad.map((p) => (
+              <li key={p.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+                <span className="text-[10px] font-mono text-muted-foreground w-7">{p.position}</span>
+                <span className="flex-1 truncate">{p.name}</span>
+                <span className="text-xs text-muted-foreground tabular-nums">{p.age}a</span>
+                <span className="text-xs font-bold text-primary tabular-nums">{p.overall}</span>
+                <button
+                  type="button"
+                  onClick={() => handleRemove(p.id)}
+                  aria-label={`Eliminar ${p.name}`}
+                  className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

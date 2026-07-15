@@ -46,7 +46,7 @@ export function makeTeamFromSquad(config: TeamConfig, squad: Player[]): Team {
     ? starters.reduce((a, b) => (a.overall > b.overall ? a : b), starters[0])
     : normalizedSquad[0];
   const kicker = starters.length
-    ? [...starters].sort((a, b) => b.attack - a.attack)[0]
+    ? [...starters].sort((a, b) => b.shooting - a.shooting)[0]
     : normalizedSquad[0];
   return {
     config,

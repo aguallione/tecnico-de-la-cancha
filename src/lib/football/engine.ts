@@ -81,26 +81,62 @@ export function outOfPositionFactor(player: Player): number {
   return 0.75; // dist === 2: extremos
 }
 
+/**
+ * Nivel ofensivo de un jugador para rematar: combinación de Tiro y Regate.
+ * Pesa más el Tiro (70%) que el Regate (30%) para la calidad del remate.
+ */
+function shooterRating(p: Player): number {
+  return (p.shooting * 0.7 + p.dribbling * 0.3) * outOfPositionFactor(p);
+}
+
+/**
+ * Nivel de creación / progresión del ataque: combinación de Pase y Velocidad.
+ * Pesa más el Pase (75%) que la Velocidad (25%).
+ */
+function creatorRating(p: Player): number {
+  return (p.passing * 0.75 + p.pace * 0.25) * outOfPositionFactor(p);
+}
+
+/**
+ * Capacidad defensiva: combinación de Defensa y Físico.
+ * Pesa más la Defensa (70%) que el Físico (30%).
+ */
+function defenderRating(p: Player): number {
+  return (p.defense * 0.7 + p.physical * 0.3) * outOfPositionFactor(p);
+}
+
+/**
+ * Capacidad de sprint / desgaste: combinación de Físico y Velocidad.
+ */
+function athleticRating(p: Player): number {
+  return (p.physical * 0.5 + p.pace * 0.5);
+}
+
 function teamStrength(team: Team): { attack: number; defense: number; overall: number } {
   const onField = team.squad.filter((p) => p.onField && !p.redCarded);
   if (onField.length === 0) return { attack: 40, defense: 40, overall: 40 };
   const staminaFactor = (p: Player) => 0.6 + 0.4 * (p.stamina / 100) * (p.injured ? 0.7 : 1);
-  const posFactor = (p: Player) => outOfPositionFactor(p);
-  const eff = (p: Player) => staminaFactor(p) * posFactor(p);
 
-  // Nivel de Ataque: FWD + MID en cancha, usando su stat de ataque
+  // Nivel de Ataque: FWD + MID en cancha — combinación de creación (Pase+Velocidad)
+  // y remate (Tiro+Regate). Los creadores dan profundidad, los rematadores definen.
   const atkLine = onField.filter((p) => p.fieldPosition === "FWD" || p.fieldPosition === "MID");
-  // Nivel de Defensa: DEF + GK en cancha, usando su stat de defensa
   const defLine = onField.filter((p) => p.fieldPosition === "DEF" || p.fieldPosition === "GK");
 
   const atk = atkLine.length > 0
-    ? avg(atkLine.map((p) => p.attack * eff(p)))
-    : avg(onField.map((p) => p.attack * eff(p)));
-  const def = defLine.length > 0
-    ? avg(defLine.map((p) => p.defense * eff(p)))
-    : avg(onField.map((p) => p.defense * eff(p)));
+    ? avg(atkLine.map((p) => {
+        const sf = staminaFactor(p);
+        return (creatorRating(p) * 0.4 + shooterRating(p) * 0.6) * sf;
+      }))
+    : avg(onField.map((p) => {
+        const sf = staminaFactor(p);
+        return (creatorRating(p) * 0.4 + shooterRating(p) * 0.6) * sf;
+      }));
 
-  const ov = avg(onField.map((p) => p.overall * eff(p)));
+  const def = defLine.length > 0
+    ? avg(defLine.map((p) => defenderRating(p) * staminaFactor(p)))
+    : avg(onField.map((p) => defenderRating(p) * staminaFactor(p)));
+
+  const ov = avg(onField.map((p) => p.overall * staminaFactor(p) * outOfPositionFactor(p)));
   // Penalización por hombres menos
   const numericPenalty = Math.max(0, 11 - onField.length) * 4;
   // Ajuste táctico: roles individuales + altura de línea (tabla configurable en tactics.ts).
@@ -131,11 +167,11 @@ export function previewStrength(team: Team): { attack: number; defense: number }
   const atkLine = starters.filter((p) => p.fieldPosition === "FWD" || p.fieldPosition === "MID");
   const defLine = starters.filter((p) => p.fieldPosition === "DEF" || p.fieldPosition === "GK");
   const baseAtk = atkLine.length > 0
-    ? avg(atkLine.map((p) => p.attack * outOfPositionFactor(p)))
-    : avg(starters.map((p) => p.attack * outOfPositionFactor(p)));
+    ? avg(atkLine.map((p) => (creatorRating(p) * 0.4 + shooterRating(p) * 0.6) * outOfPositionFactor(p)))
+    : avg(starters.map((p) => (creatorRating(p) * 0.4 + shooterRating(p) * 0.6) * outOfPositionFactor(p)));
   const baseDef = defLine.length > 0
-    ? avg(defLine.map((p) => p.defense * outOfPositionFactor(p)))
-    : avg(starters.map((p) => p.defense * outOfPositionFactor(p)));
+    ? avg(defLine.map((p) => defenderRating(p) * outOfPositionFactor(p)))
+    : avg(starters.map((p) => defenderRating(p) * outOfPositionFactor(p)));
   const tac = teamTacticalAdjustment(team, starters);
   return {
     attack: Math.round(baseAtk + tac.attack),
@@ -225,11 +261,13 @@ export function tickMinute(state: MatchState): MatchEvent[] {
   }
 
   // Reducir stamina — la presión alta cansa más rápido (tabla en tactics.ts)
+  // El desgaste depende del atlético del jugador (Físico+Velocidad): mejor físico = menos desgaste.
   for (const t of state.teams) {
     const drain = PRESS_TABLE[t.pressIntensity ?? "Media"].staminaDrain;
     for (const p of t.squad) {
       if (p.onField && !p.redCarded) {
-        p.stamina = Math.max(20, p.stamina - (0.5 + rand() * 0.8) * drain);
+        const athleticMod = 0.7 + 0.3 * (athleticRating(p) / 99);
+        p.stamina = Math.max(20, p.stamina - (0.5 + rand() * 0.8) * drain / athleticMod);
       }
     }
   }
@@ -473,23 +511,31 @@ function handleAttack(state: MatchState, attacker: Team, defender: Team, atkIdx:
   attacker.shots += 1;
 
   // Rematador: se elige entre TODOS los jugadores de campo, ponderando por la
-  // posición EN CANCHA (fieldPosition) y su capacidad ofensiva. Un arquero (aunque
-  // sea un jugador de campo puesto al arco) tiene un peso ínfimo → casi nunca convierte.
+  // posición EN CANCHA (fieldPosition) y su capacidad ofensiva específica.
+  // Usa shooterRating (Tiro+Regate) en vez de un "attack" genérico.
+  // Un arquero tiene peso ínfimo → casi nunca convierte.
   const candidates = attacker.squad.filter((p) => p.onField && !p.redCarded);
   const shooter = weightedPick(
     candidates,
-    (p) => scorerWeight(p.fieldPosition) * (0.5 + (p.attack * outOfPositionFactor(p)) / 100),
+    (p) => scorerWeight(p.fieldPosition) * (0.5 + shooterRating(p) / 100),
   );
   if (!shooter) return;
+
+  // El atacante progresa con creadores (Pase+Velocidad) antes de rematar.
+  // Tomamos el promedio de creatorRating del equipo atacante como bonus de ocasión.
+  const atkCreators = candidates.filter((p) => p.fieldPosition === "MID" || p.fieldPosition === "FWD");
+  const creationBonus = atkCreators.length > 0
+    ? avg(atkCreators.map((p) => creatorRating(p)))
+    : avg(candidates.map((p) => creatorRating(p)));
 
   const sA = teamStrength(attacker);
   const sD = teamStrength(defender);
   const styleAtk = styleAttackMod(attacker.style);
   const styleDef = styleDefenseMod(defender.style);
-  const shooterAtk = shooter.attack * outOfPositionFactor(shooter);
-  // Diferencial ataque-vs-defensa: la defensa rival pesa el doble que el nivel
-  // individual del rematador para que una defensa débil concierne más goles.
-  const diff = (sA.attack + shooterAtk) / 2 - sD.defense;
+  const shooterAtk = shooterRating(shooter);
+  // Diferencial: combina el rematador, la creación del equipo y la defensa rival.
+  // La defensa rival pesa el doble que el rematador individual.
+  const diff = (sA.attack + shooterAtk + creationBonus * 0.3) / 2.3 - sD.defense;
   // Estilo de salida del atacante: rápido = ataques más directos y arriesgados.
   const buRisk = BUILDUP_TABLE[attacker.buildUp ?? "Equilibrado"].riskGoalProb;
   const goalProb = Math.max(0.05, Math.min(0.6, 0.18 + diff / 170 + styleAtk * 0.1 - styleDef * 0.1 + buRisk));
@@ -503,6 +549,7 @@ function handleAttack(state: MatchState, attacker: Team, defender: Team, atkIdx:
   if (shooterStats) shooterStats.shots += 1;
 
   // Arquero defensor: su efectividad depende del out-of-position factor.
+  // La capacidad de atajada del arquero usa su Defensa (atributo principal para GK).
   const gk = defender.squad.find((p) => p.onField && !p.redCarded && p.fieldPosition === "GK");
   const gkFactor = gk ? outOfPositionFactor(gk) : 0.65;
   // Un arquero fuera de posición encaja más goles.

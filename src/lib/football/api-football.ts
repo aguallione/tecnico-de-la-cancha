@@ -48,40 +48,39 @@ function mapPosition(apiPos: string | null | undefined): Position {
 }
 
 /**
- * Genera los atributos de un jugador a partir de su posición y valoración general.
- * Los atributos Attack/Defense/Physical/Pace no existen en la API, así que se
- * derivan del overall con variación aleatoria coherente por puesto.
+ * Genera los 6 atributos de un jugador a partir de su posición y valoración general.
+ * Los atributos no existen en la API, así que se derivan del overall con variación
+ * aleatoria coherente por puesto.
  */
 function deriveAttributes(pos: Position, overall: number) {
   const jitter = () => Math.floor(Math.random() * 13) - 6; // ±6
-  let attack = overall + jitter();
+  let passing = overall + jitter();
+  let shooting = overall + jitter()
+  let dribbling = overall + jitter();
   let defense = overall + jitter();
   let physical = overall + jitter();
   let pace = overall + jitter();
 
   switch (pos) {
     case "GK":
-      defense += 8;
-      attack -= 22;
-      pace -= 8;
+      defense += 12; shooting -= 25; pace -= 8; passing -= 6; dribbling -= 18; physical += 4;
       break;
     case "DEF":
-      defense += 9;
-      attack -= 9;
+      defense += 10; shooting -= 10; dribbling -= 6; passing -= 2;
       break;
     case "MID":
-      // Equilibrado — sin ajuste base
+      passing += 6; dribbling += 2;
       break;
     case "FWD":
-      attack += 10;
-      defense -= 10;
-      pace += 5;
+      shooting += 10; dribbling += 8; defense -= 10; pace += 4; passing += 2;
       break;
   }
 
   const clamp = (n: number) => Math.max(30, Math.min(99, n));
   return {
-    attack: clamp(attack),
+    passing: clamp(passing),
+    shooting: clamp(shooting),
+    dribbling: clamp(dribbling),
     defense: clamp(defense),
     physical: clamp(physical),
     pace: clamp(pace),
@@ -161,7 +160,7 @@ export async function fetchSquad(
       const overall = ratingToOverall(stats.games.rating, pos);
       const attrs = deriveAttributes(pos, overall);
       const computedOverall = Math.round(
-        (attrs.attack + attrs.defense + attrs.physical + attrs.pace) / 4,
+        (attrs.passing + attrs.shooting + attrs.dribbling + attrs.defense + attrs.physical + attrs.pace) / 6,
       );
 
       return {
