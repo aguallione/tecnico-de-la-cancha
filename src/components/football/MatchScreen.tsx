@@ -4,9 +4,16 @@ import { initMatch, substitute, tickMinute, possessionPct, outOfPositionFactor, 
 import { autoLineup } from "@/lib/football/bot";
 import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
 import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
-import type { BuildUp, FormationName, LineHeight, Player, Position, PressIntensity, Style, Team } from "@/lib/football/types";
+import type { BuildUp, FormationName, LineHeight, Player, Position, PositionGroup, PressIntensity, Style, Team } from "@/lib/football/types";
+import { POSITION_GROUP } from "@/lib/football/types";
 
-const POSITION_SHORT: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
+const POSITION_SHORT: Record<Position, string> = {
+  POR: "POR",
+  DFC: "DFC", LI: "LI", LD: "LD", CAI: "CAI", CAD: "CAD",
+  MCD: "MCD", MC: "MC", MI: "MI", MD: "MD", MCO: "MCO",
+  DC: "DC", SD: "SD", EI: "EI", ED: "ED",
+};
+const GROUP_SHORT: Record<PositionGroup, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
 
 // Emergency formation used when a player is sent off
 const EMERGENCY_FORMATION: FormationName = "5-3-2";
@@ -267,14 +274,14 @@ function LiveSlotGrid({ team, onChange }: { team: Team; onChange: () => void }) 
     for (const p of team.squad) {
       const idx = team.starting.indexOf(p.id);
       if (idx >= 0 && p.onField && !p.redCarded) {
-        p.fieldPosition = slots[idx] as Position;
+        p.fieldPosition = slots[idx]; // slots devuelve PositionGroup[]
         p.slotIndex = idx;
       }
     }
     onChange();
   }
 
-  const rows: Position[] = ["FWD", "MID", "DEF", "GK"];
+  const rows: PositionGroup[] = ["FWD", "MID", "DEF", "GK"];
   return (
     <div className="rounded-xl bg-pitch overflow-hidden" style={{ minHeight: 220 }}>
       <div className="relative grid grid-rows-4 h-[220px] p-2 gap-0.5">
@@ -286,13 +293,13 @@ function LiveSlotGrid({ team, onChange }: { team: Team; onChange: () => void }) 
               {rowIndexes.map((slotIdx) => {
                 const playerId = team.starting[slotIdx];
                 const player = team.squad.find((p) => p.id === playerId);
-                const slotPos = slots[slotIdx] as Position;
-                const factor = player ? outOfPositionFactor({ ...player, fieldPosition: slotPos }) : 1;
+                const slotGroup = slots[slotIdx]; // PositionGroup
+                const factor = player ? outOfPositionFactor({ ...player, fieldPosition: slotGroup }) : 1;
                 const oop = player && factor < 1;
                 const effective = player ? Math.round(player.overall * factor) : 0;
                 return (
                   <label key={slotIdx} className="flex flex-col items-center text-center min-w-0 flex-1 max-w-[6rem]">
-                    <span className="text-[9px] uppercase tracking-wider text-lime-200/80">{POSITION_SHORT[slotPos]}</span>
+                    <span className="text-[9px] uppercase tracking-wider text-lime-200/80">{GROUP_SHORT[slotGroup]}</span>
                     <select
                       value={playerId ?? ""}
                       onChange={(e) => swapSlot(slotIdx, e.target.value)}

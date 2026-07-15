@@ -59,7 +59,8 @@ export interface Player {
   redCarded: boolean;
   yellowCards: number;
   injured: boolean;
-  fieldPosition?: Position; // posición asignada en la alineación
+  /** Grupo del slot asignado en la formación (GK/DEF/MID/FWD). Distinto de position (específica). */
+  fieldPosition?: PositionGroup;
   slotIndex?: number;
 }
 

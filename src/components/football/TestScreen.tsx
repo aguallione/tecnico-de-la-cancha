@@ -4,9 +4,16 @@ import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
 import { autoLineup } from "@/lib/football/bot";
 import { outOfPositionFactor } from "@/lib/football/engine";
 import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
-import type { BuildUp, FormationName, LineHeight, Player, Position, PressIntensity, Team } from "@/lib/football/types";
+import type { BuildUp, FormationName, LineHeight, Player, Position, PositionGroup, PressIntensity, Team } from "@/lib/football/types";
+import { POSITION_GROUP } from "@/lib/football/types";
 
-const POSITION_SHORT: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
+const POSITION_SHORT: Record<Position, string> = {
+  POR: "POR",
+  DFC: "DFC", LI: "LI", LD: "LD", CAI: "CAI", CAD: "CAD",
+  MCD: "MCD", MC: "MC", MI: "MI", MD: "MD", MCO: "MCO",
+  DC: "DC", SD: "SD", EI: "EI", ED: "ED",
+};
+const GROUP_SHORT: Record<PositionGroup, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
 
 export function TestScreen() {
   const { setTeams, setScreen, settings, setTestMode } = useGame();
@@ -154,15 +161,15 @@ function TeamSetup({ team, label, onSwap, onFormation, onChange }: {
       </div>
 
       <div className="mt-3 space-y-1.5">
-        {slots.map((slotPos, i) => {
+        {slots.map((slotGroup, i) => {
           const p = team.squad.find((pp) => pp.id === team.starting[i]);
           if (!p) return null;
-          const factor = outOfPositionFactor({ ...p, fieldPosition: slotPos });
+          const factor = outOfPositionFactor({ ...p, fieldPosition: slotGroup });
           const oop = factor < 1;
           const effective = Math.round(p.overall * factor);
           return (
             <div key={i} className="flex items-center gap-2 text-sm">
-              <span className="text-xs font-bold w-10 text-muted-foreground">{POSITION_SHORT[slotPos]}</span>
+              <span className="text-xs font-bold w-10 text-muted-foreground">{GROUP_SHORT[slotGroup]}</span>
               <select
                 className="input flex-1 text-xs"
                 value={p.id}

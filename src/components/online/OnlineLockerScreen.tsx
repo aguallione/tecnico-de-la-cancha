@@ -34,17 +34,20 @@ import type {
   MatchSettings,
   Player,
   Position,
+  PositionGroup,
   PressIntensity,
   Style,
   Team,
 } from "@/lib/football/types";
-import { useOnlineGame } from "@/lib/online/store";
-import { estaConectado, type JugadorOnline, type ModoCoop } from "@/lib/online/types";
-import { guardarEquipo, guardarMatchState, marcarEquipoListo } from "@/lib/online/api";
-import { TransferirAdminModal } from "@/components/online/TransferirAdminModal";
-import { OnlineHeader } from "@/components/online/OnlineHeader";
+import { POSITION_GROUP } from "@/lib/football/types";
 
-const POSITION_SHORT: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
+const POSITION_SHORT: Record<Position, string> = {
+  POR: "POR",
+  DFC: "DFC", LI: "LI", LD: "LD", CAI: "CAI", CAD: "CAD",
+  MCD: "MCD", MC: "MC", MI: "MI", MD: "MD", MCO: "MCO",
+  DC: "DC", SD: "SD", EI: "EI", ED: "ED",
+};
+const GROUP_SHORT: Record<PositionGroup, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
 
 const DEFAULT_SETTINGS: MatchSettings = {
   injuriesEnabled: true,
@@ -334,7 +337,7 @@ function LockerInner({
           {/* Cancha */}
           <div className="mt-5 rounded-2xl bg-pitch relative overflow-hidden" style={{ minHeight: 380 }}>
             <div className="relative z-10 grid grid-rows-4 h-[380px] p-3 gap-1">
-              {(["FWD", "MID", "DEF", "GK"] as Position[]).map((rowPos) => {
+              {(["FWD", "MID", "DEF", "GK"] as PositionGroup[]).map((rowPos) => {
                 const indexes = slots.map((s, i) => (s === rowPos ? i : -1)).filter((i) => i >= 0);
                 if (indexes.length === 0) return null;
                 return (
@@ -342,13 +345,13 @@ function LockerInner({
                     {indexes.map((i) => {
                       const id = team.starting[i];
                       const p = team.squad.find((pp) => pp.id === id);
-                      const slotPos = slots[i];
-                      const factor = p ? outOfPositionFactor({ ...p, fieldPosition: slotPos }) : 1;
+                      const slotGroup = slots[i]; // PositionGroup
+                      const factor = p ? outOfPositionFactor({ ...p, fieldPosition: slotGroup }) : 1;
                       const oop = p && factor < 1;
                       return (
                         <label key={i} className="flex flex-col items-center text-center max-w-[9rem] flex-1">
                           <span className="text-[10px] uppercase tracking-wider text-lime-200/80">
-                            {POSITION_SHORT[slotPos]}
+                            {GROUP_SHORT[slotGroup]}
                           </span>
                           <select
                             value={id ?? ""}
@@ -433,8 +436,6 @@ function LockerInner({
   );
 }
 
-const POSITION_SHORT_ROLES: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
-
 function RoleEffectBadge({ role }: { role: string | undefined }) {
   const eff = roleEffect(role);
   if (!role || (eff.attack === 0 && eff.defense === 0)) {
@@ -460,16 +461,16 @@ function IndividualRoles({
   canEdit,
 }: {
   team: Team;
-  slots: Position[];
+  slots: PositionGroup[];
   onChange: () => void;
   canEdit: boolean;
 }) {
   const starters = team.starting
     .map((id, i) => {
       const p = team.squad.find((pp) => pp.id === id);
-      return p ? { p, fieldPos: slots[i] } : null;
+      return p ? { p, fieldGroup: slots[i] } : null;
     })
-    .filter(Boolean) as Array<{ p: Player; fieldPos: Position }>;
+    .filter(Boolean) as Array<{ p: Player; fieldGroup: PositionGroup }>;
 
   return (
     <div className="mt-6">
@@ -478,8 +479,8 @@ function IndividualRoles({
         Ajustan levemente el aporte de cada jugador al Nivel de Ataque o Defensa del equipo.
       </p>
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
-        {starters.map(({ p, fieldPos }) => {
-          const roles = rolesForPosition(fieldPos);
+        {starters.map(({ p, fieldGroup }) => {
+          const roles = rolesForPosition(fieldGroup);
           const groups = Array.from(new Set(roles.map((r) => ROLE_TABLE[r].group ?? "")));
           const currentRole = roles.includes(p.individualRole || "") ? p.individualRole : "";
           return (
@@ -487,7 +488,7 @@ function IndividualRoles({
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">
                   {p.name}{" "}
-                  <span className="text-xs text-muted-foreground">({POSITION_SHORT_ROLES[fieldPos]})</span>
+                  <span className="text-xs text-muted-foreground">({POSITION_SHORT[p.position]})</span>
                 </div>
                 {roles.length > 0 ? (
                   <select
