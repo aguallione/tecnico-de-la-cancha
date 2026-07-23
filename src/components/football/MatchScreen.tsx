@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/lib/football/store";
-import { initMatch, substitute, tickMinute, possessionPct, outOfPositionFactor, type MatchState } from "@/lib/football/engine";
+import { initMatch, substitute, tickMinute, possessionPct, computePlayerPositionRating, type MatchState } from "@/lib/football/engine";
 import { autoLineup } from "@/lib/football/bot";
 import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
 import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
@@ -294,9 +294,8 @@ function LiveSlotGrid({ team, onChange }: { team: Team; onChange: () => void }) 
                 const playerId = team.starting[slotIdx];
                 const player = team.squad.find((p) => p.id === playerId);
                 const slotGroup = slots[slotIdx]; // PositionGroup
-                const factor = player ? outOfPositionFactor({ ...player, fieldPosition: slotGroup }) : 1;
-                const oop = player && factor < 1;
-                const effective = player ? Math.round(player.overall * factor) : 0;
+                const effective = player ? computePlayerPositionRating(player, slotGroup) : 0;
+                const oop = player ? effective !== player.overall : false;
                 return (
                   <label key={slotIdx} className="flex flex-col items-center text-center min-w-0 flex-1 max-w-[6rem]">
                     <span className="text-[9px] uppercase tracking-wider text-lime-200/80">{GROUP_SHORT[slotGroup]}</span>

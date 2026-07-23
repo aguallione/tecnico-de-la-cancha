@@ -17,7 +17,7 @@
 import { useMemo, useRef, useState } from "react";
 import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
 import { autoLineup } from "@/lib/football/bot";
-import { initMatch, outOfPositionFactor } from "@/lib/football/engine";
+import { initMatch, computePlayerPositionRating } from "@/lib/football/engine";
 import {
   LINE_HEIGHT_TABLE,
   BUILDUP_TABLE,
@@ -346,8 +346,8 @@ function LockerInner({
                       const id = team.starting[i];
                       const p = team.squad.find((pp) => pp.id === id);
                       const slotGroup = slots[i]; // PositionGroup
-                      const factor = p ? outOfPositionFactor({ ...p, fieldPosition: slotGroup }) : 1;
-                      const oop = p && factor < 1;
+                      const effective = p ? computePlayerPositionRating(p, slotGroup) : 0;
+                      const oop = p ? POSITION_GROUP[p.position] !== slotGroup : false;
                       return (
                         <label key={i} className="flex flex-col items-center text-center max-w-[9rem] flex-1">
                           <span className="text-[10px] uppercase tracking-wider text-lime-200/80">

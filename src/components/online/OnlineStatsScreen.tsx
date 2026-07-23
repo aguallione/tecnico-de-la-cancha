@@ -10,7 +10,7 @@
 import { useState } from "react";
 import { useOnlineGame } from "@/lib/online/store";
 import { deserializeMatchState } from "@/lib/football/serialization";
-import { computePlayerRating, computeTeamRating, outOfPositionFactor } from "@/lib/football/engine";
+import { computePlayerRating, computePlayerPositionRating, computeTeamRating } from "@/lib/football/engine";
 import type { Team, PlayerMatchStats } from "@/lib/football/types";
 import { cerrarPartida, reiniciarPartida } from "@/lib/online/api";
 import { OnlineHeader } from "@/components/online/OnlineHeader";
@@ -198,8 +198,7 @@ function PlayerRatings({
         {starters.map((p) => {
           const ps = stats[p.id];
           const rating = computePlayerRating(p, ps);
-          const factor = outOfPositionFactor(p);
-          const oop = factor < 1;
+          const oop = p.fieldPosition ? POSITION_GROUP[p.position] !== p.fieldPosition : false;
           return (
             <div key={p.id} className="flex items-center gap-2 text-sm">
               <span className="flex-1 truncate">

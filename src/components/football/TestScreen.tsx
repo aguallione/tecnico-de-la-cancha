@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useGame, makeTeam } from "@/lib/football/store";
 import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
 import { autoLineup } from "@/lib/football/bot";
-import { outOfPositionFactor } from "@/lib/football/engine";
+import { computePlayerPositionRating } from "@/lib/football/engine";
 import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
 import type { BuildUp, FormationName, LineHeight, Player, Position, PositionGroup, PressIntensity, Team } from "@/lib/football/types";
 import { POSITION_GROUP } from "@/lib/football/types";
@@ -93,7 +93,7 @@ function TeamSetup({ team, label, onSwap, onFormation, onChange }: {
   const starters = team.squad.filter((p) => team.starting.includes(p.id));
   const oopCount = starters.filter((p, i) => p.position !== slots[i]).length;
   const baseAvg = Math.round(starters.reduce((s, p) => s + p.overall, 0) / 11);
-  const effAvg = Math.round(starters.reduce((s, p, i) => s + p.overall * outOfPositionFactor({ ...p, fieldPosition: slots[i] }), 0) / 11);
+  const effAvg = Math.round(starters.reduce((s, p, i) => s + computePlayerPositionRating(p, slots[i]), 0) / 11);
 
   return (
     <div className="card p-4">
@@ -164,9 +164,8 @@ function TeamSetup({ team, label, onSwap, onFormation, onChange }: {
         {slots.map((slotGroup, i) => {
           const p = team.squad.find((pp) => pp.id === team.starting[i]);
           if (!p) return null;
-          const factor = outOfPositionFactor({ ...p, fieldPosition: slotGroup });
-          const oop = factor < 1;
-          const effective = Math.round(p.overall * factor);
+          const effective = computePlayerPositionRating(p, slotGroup);
+          const oop = effective !== p.overall;
           return (
             <div key={i} className="flex items-center gap-2 text-sm">
               <span className="text-xs font-bold w-10 text-muted-foreground">{GROUP_SHORT[slotGroup]}</span>

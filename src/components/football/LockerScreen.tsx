@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useGame } from "@/lib/football/store";
 import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
 import { autoLineup } from "@/lib/football/bot";
-import { outOfPositionFactor } from "@/lib/football/engine";
+import { computePlayerPositionRating } from "@/lib/football/engine";
 import {
   ROLE_TABLE,
   rolesForPosition,
@@ -229,7 +229,7 @@ export function LockerScreen() {
           const oopList = starters.filter((s) => POSITION_GROUP[s.p!.position] !== s.group);
           if (oopList.length === 0) return null;
               const baseAvg = Math.round(avg(starters.map((s) => s.p!.overall)));
-              const effAvg = Math.round(avg(starters.map((s) => s.p!.overall * outOfPositionFactor({ ...s.p!, fieldPosition: s.group }))));
+              const effAvg = Math.round(avg(starters.map((s) => computePlayerPositionRating(s.p!, s.group))));
               return (
                 <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3">
                   <div className="flex items-center gap-2 text-sm font-semibold text-red-300">
@@ -406,9 +406,8 @@ function SlotChip({ team, slotIndex, slotGroup, onSwap, seeOwnRatings }: {
 }) {
   const id = team.starting[slotIndex];
   const p = team.squad.find((pp) => pp.id === id);
-  const factor = p ? outOfPositionFactor({ ...p, fieldPosition: slotGroup }) : 1;
-  const oop = p && factor < 1;
-  const effective = p ? Math.round(p.overall * factor) : 0;
+  const effective = p ? computePlayerPositionRating(p, slotGroup) : 0;
+  const oop = p ? effective !== p.overall : false;
   return (
     <label className="relative flex flex-col items-center text-center max-w-[9rem]">
       <span className="text-[10px] uppercase tracking-wider text-lime-200/80">{GROUP_SHORT[slotGroup]}</span>
