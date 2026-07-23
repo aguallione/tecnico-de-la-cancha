@@ -1,5 +1,6 @@
 import { useGame } from "@/lib/football/store";
 import { computePlayerPositionRating, computePlayerRating, computeTeamRating } from "@/lib/football/engine";
+import { POSITION_GROUP } from "@/lib/football/types";
 import type { Team, PlayerMatchStats } from "@/lib/football/types";
 
 export function StatsScreen() {
@@ -200,10 +201,10 @@ function GKCard({ team, shotsOnTargetReceived }: { team: Team; shotsOnTargetRece
           </div>
         </div>
         <div className="text-right">
-          <div className="text-xs text-muted-foreground">Puntaje base → efectivo</div>
+          <div className="text-xs text-muted-foreground">Puntaje efectivo</div>
           <div className="font-display font-black text-lg">
-            {gk.overall}
-            {oop && <span className="text-red-500"> → {effective}</span>}
+            {effective}
+            {oop && <span className="text-red-500"> ({gk.overall})</span>}
           </div>
         </div>
       </div>

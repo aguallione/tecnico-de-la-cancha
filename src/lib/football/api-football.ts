@@ -104,7 +104,7 @@ function deriveAttributes(pos: Position, overall: number) {
 function ratingToOverall(rating: string | null | undefined, pos: Position): number {
   if (!rating) {
     // Sin rating: generar uno razonable según posición
-    const base: Record<Position, number> = { GK: 72, DEF: 70, MID: 71, FWD: 72 };
+    const base: Record<string, number> = { GK: 72, DEF: 70, MID: 71, FWD: 72 };
     return base[pos] + Math.floor(Math.random() * 10) - 5;
   }
   const r = parseFloat(rating);

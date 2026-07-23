@@ -11,6 +11,7 @@ import { useState } from "react";
 import { useOnlineGame } from "@/lib/online/store";
 import { deserializeMatchState } from "@/lib/football/serialization";
 import { computePlayerRating, computePlayerPositionRating, computeTeamRating } from "@/lib/football/engine";
+import { POSITION_GROUP } from "@/lib/football/types";
 import type { Team, PlayerMatchStats } from "@/lib/football/types";
 import { cerrarPartida, reiniciarPartida } from "@/lib/online/api";
 import { OnlineHeader } from "@/components/online/OnlineHeader";

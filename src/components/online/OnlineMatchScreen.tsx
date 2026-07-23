@@ -315,18 +315,21 @@ function LiveSlotGrid({ team, onChange }: { team: Team; onChange: () => void }) 
                       onChange={(e) => swapSlot(slotIdx, e.target.value)}
                       className="mt-0.5 w-full appearance-none rounded bg-white/90 text-foreground text-[10px] font-medium px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary truncate"
                     >
-                      {onFieldPlayers.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({p.overall} {POSITION_SHORT[p.position]})
-                        </option>
-                      ))}
+                      {onFieldPlayers.map((p) => {
+                        const effectiveOption = computePlayerPositionRating(p, slotGroup);
+                        return (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({effectiveOption} {POSITION_SHORT[p.position]})
+                          </option>
+                        );
+                      })}
                     </select>
                     {player && (
                       <div className="text-[9px] text-lime-100/70 mt-0.5">
                         {oop ? (
                           <span className="text-red-400">{player.overall} &rarr; {effective}</span>
                         ) : (
-                          <span>{player.overall}</span>
+                          <span>{effective}</span>
                         )}
                       </div>
                     )}
@@ -563,19 +566,25 @@ function OnlineTacticsPanel({
             <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
               <select className="input" value={subOutId} onChange={(e) => setSubOutId(e.target.value)}>
                 <option value="">Sale…</option>
-                {onField.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.overall} {p.position}) · {Math.round(p.stamina)}%
-                  </option>
-                ))}
+                {onField.map((p) => {
+                  const effectiveOption = computePlayerPositionRating(p, p.position === "POR" ? "GK" : POSITION_GROUP[p.position]);
+                  return (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({effectiveOption} {p.position}) · {Math.round(p.stamina)}%
+                    </option>
+                  );
+                })}
               </select>
               <select className="input" value={subInId} onChange={(e) => setSubInId(e.target.value)}>
                 <option value="">Entra…</option>
-                {bench.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.overall} {p.position})
-                  </option>
-                ))}
+                {bench.map((p) => {
+                  const effectiveOption = computePlayerPositionRating(p, p.position === "POR" ? "GK" : POSITION_GROUP[p.position]);
+                  return (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({effectiveOption} {p.position})
+                    </option>
+                  );
+                })}
               </select>
             </div>
             <button

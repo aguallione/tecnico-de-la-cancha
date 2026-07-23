@@ -305,18 +305,21 @@ function LiveSlotGrid({ team, onChange }: { team: Team; onChange: () => void }) 
                       className="mt-0.5 w-full appearance-none rounded bg-white/90 text-foreground text-[10px] font-medium px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary truncate"
                     >
                       {/* Solo jugadores que ya están en cancha — sin banco */}
-                      {onFieldPlayers.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({p.overall} {POSITION_SHORT[p.position]})
-                        </option>
-                      ))}
+                      {onFieldPlayers.map((p) => {
+                        const effectiveOption = computePlayerPositionRating(p, slotGroup);
+                        return (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({effectiveOption} {POSITION_SHORT[p.position]})
+                          </option>
+                        );
+                      })}
                     </select>
                     {player && (
                       <div className="text-[9px] text-lime-100/70 mt-0.5">
                         {oop ? (
                           <span className="text-red-400">{player.overall} &rarr; {effective}</span>
                         ) : (
-                          <span>{player.overall}</span>
+                          <span>{effective}</span>
                         )}
                       </div>
                     )}
@@ -468,7 +471,10 @@ function TacticsPanel({ teamIdx, state, onClose, onChange }: {
               </select>
               <select className="input" value={subInId} onChange={(e) => setSubInId(e.target.value)}>
                 <option value="">Entra...</option>
-                {bench.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.position} {p.overall})</option>)}
+                {bench.map((p) => {
+                  const effectiveOption = computePlayerPositionRating(p, p.position === "POR" ? "GK" : POSITION_GROUP[p.position]);
+                  return <option key={p.id} value={p.id}>{p.name} ({effectiveOption} {p.position})</option>;
+                })}
               </select>
             </div>
             <button

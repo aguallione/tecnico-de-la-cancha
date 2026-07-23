@@ -21,6 +21,7 @@
 
 import { useState, useMemo } from "react";
 import { uid } from "@/lib/football/players";
+import { computePlayerPositionRating } from "@/lib/football/engine";
 import type { Player, Position } from "@/lib/football/types";
 import { POSITION_GROUP } from "@/lib/football/types";
 
@@ -98,6 +99,35 @@ export function CreatePlayerScreen({ onPlayerCreated, onCancel }: Props) {
     () => Math.round((attrs.passing + attrs.shooting + attrs.dribbling + attrs.defense + attrs.physical + attrs.pace) / 6),
     [attrs],
   );
+
+  const effectiveRating = useMemo(() => {
+    const player: Player = {
+      id: "preview",
+      name: "preview",
+      position,
+      overall,
+      passing: attrs.passing,
+      shooting: attrs.shooting,
+      dribbling: attrs.dribbling,
+      defense: attrs.defense,
+      physical: attrs.physical,
+      pace: attrs.pace,
+      age,
+      stamina: 100,
+      onField: false,
+      redCarded: false,
+      yellowCards: 0,
+      injured: false,
+      ...(isPOR ? {
+        gkDiving: gkAttrs.gkDiving,
+        gkHandling: gkAttrs.gkHandling,
+        gkKicking: gkAttrs.gkKicking,
+        gkReflexes: gkAttrs.gkReflexes,
+        gkPositioning: gkAttrs.gkPositioning,
+      } : {}),
+    } as Player;
+    return computePlayerPositionRating(player, isPOR ? "GK" : group);
+  }, [position, overall, attrs, gkAttrs, group, isPOR]);
 
   const totalGastado = useMemo(
     () => attrs.passing + attrs.shooting + attrs.dribbling + attrs.defense + attrs.physical + attrs.pace,
@@ -305,7 +335,7 @@ export function CreatePlayerScreen({ onPlayerCreated, onCancel }: Props) {
       <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 p-3">
         <span className="text-sm text-muted-foreground">General resultante</span>
         <span className={`font-display text-2xl font-black ${excedido ? "text-destructive" : "text-primary"}`}>
-          {overall}
+          {effectiveRating}
         </span>
       </div>
 

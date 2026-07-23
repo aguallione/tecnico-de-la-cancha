@@ -91,7 +91,7 @@ function TeamSetup({ team, label, onSwap, onFormation, onChange }: {
 }) {
   const slots = slotsFor(team.formation);
   const starters = team.squad.filter((p) => team.starting.includes(p.id));
-  const oopCount = starters.filter((p, i) => p.position !== slots[i]).length;
+  const oopCount = starters.filter((p, i) => POSITION_GROUP[p.position] !== slots[i]).length;
   const baseAvg = Math.round(starters.reduce((s, p) => s + p.overall, 0) / 11);
   const effAvg = Math.round(starters.reduce((s, p, i) => s + computePlayerPositionRating(p, slots[i]), 0) / 11);
 
@@ -174,15 +174,18 @@ function TeamSetup({ team, label, onSwap, onFormation, onChange }: {
                 value={p.id}
                 onChange={(e) => onSwap(i, e.target.value)}
               >
-                {team.squad.map((sp) => (
-                  <option key={sp.id} value={sp.id}>
-                    {sp.name} ({sp.overall} {POSITION_SHORT[sp.position]})
-                  </option>
-                ))}
+                {team.squad.map((sp) => {
+                  const effectiveOption = computePlayerPositionRating(sp, slotGroup);
+                  return (
+                    <option key={sp.id} value={sp.id}>
+                      {sp.name} ({effectiveOption} {POSITION_SHORT[sp.position]})
+                    </option>
+                  );
+                })}
               </select>
-              <span className="font-display font-bold tabular-nums w-8 text-right">{p.overall}</span>
-              {oop && <span className="font-display font-bold tabular-nums w-8 text-right text-red-500">{effective}</span>}
-              {!oop && <span className="w-8" />}
+              <span className="font-display font-bold tabular-nums w-8 text-right">
+                {oop ? `${p.overall} → ${effective}` : effective}
+              </span>
             </div>
           );
         })}

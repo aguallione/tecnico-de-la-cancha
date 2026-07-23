@@ -40,6 +40,11 @@ import type {
   Team,
 } from "@/lib/football/types";
 import { POSITION_GROUP } from "@/lib/football/types";
+import type { JugadorOnline, ModoCoop } from "@/lib/online/types";
+import { useOnlineGame } from "@/lib/online/store";
+import { guardarEquipo, marcarEquipoListo, guardarMatchState } from "@/lib/online/api";
+import { OnlineHeader } from "@/components/online/OnlineHeader";
+import { TransferirAdminModal } from "@/components/online/TransferirAdminModal";
 
 const POSITION_SHORT: Record<Position, string> = {
   POR: "POR",
@@ -360,11 +365,13 @@ function LockerInner({
                           >
                             {team.squad.map((sp) => (
                               <option key={sp.id} value={sp.id}>
-                                {sp.name} ({sp.overall} {POSITION_SHORT[sp.position]})
+                                {sp.name} ({sp.position})
                               </option>
                             ))}
                           </select>
-                          {oop && <span className="text-[10px] font-bold text-red-400 mt-0.5">Fuera de pos.</span>}
+                          <div className="text-[10px] text-lime-100/70 mt-0.5">
+                            {oop ? <span className="text-red-400">{p?.overall ?? 0} → {effective}</span> : <span>{effective}</span>}
+                          </div>
                         </label>
                       );
                     })}

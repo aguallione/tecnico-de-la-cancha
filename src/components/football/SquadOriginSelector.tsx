@@ -544,7 +544,7 @@ function CreateMode({
   onReady,
   onSquadReady,
 }: {
-  onReady: (label: string) => void;
+  onReady: (label: string | null) => void;
   onSquadReady: (squad: Player[]) => void;
 }) {
   const [squad, setSquad] = useState<Player[]>([]);

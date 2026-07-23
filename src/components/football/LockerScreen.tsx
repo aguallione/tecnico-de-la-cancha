@@ -130,7 +130,7 @@ export function LockerScreen() {
             <h1 className="font-display text-2xl sm:text-3xl font-black truncate">{team.config.name} · Vestuario</h1>
           </div>
           {seeOwnRatings && (
-            <div className="text-xs text-muted-foreground">Promedio: {Math.round(starters.reduce((s, p) => s + p.overall, 0) / (starters.length || 1))}</div>
+            <div className="text-xs text-muted-foreground">Promedio: {Math.round(starters.reduce((s, p, i) => s + computePlayerPositionRating(p, slots[i]), 0) / (starters.length || 1))}</div>
           )}
         </div>
 
@@ -264,7 +264,9 @@ export function LockerScreen() {
                 </div>
                 {seeOwnRatings && (
                   <div className="text-right">
-                    <div className="font-display font-black text-lg">{p.overall}</div>
+                    <div className="font-display font-black text-lg">
+                      {computePlayerPositionRating(p, POSITION_GROUP[p.position])}
+                    </div>
                   </div>
                 )}
               </div>
@@ -416,13 +418,16 @@ function SlotChip({ team, slotIndex, slotGroup, onSwap, seeOwnRatings }: {
         onChange={(e) => onSwap(slotIndex, e.target.value)}
         className="mt-1 w-full appearance-none rounded-lg bg-white/95 text-foreground text-xs sm:text-sm font-medium px-2 py-1.5 shadow-md focus:outline-none focus:ring-2 focus:ring-primary"
       >
-        {team.squad.map((sp) => (
-          <option key={sp.id} value={sp.id}>
-            {seeOwnRatings
-              ? `${sp.name} (${sp.overall} ${POSITION_SHORT[sp.position]})`
-              : `${sp.name} (${POSITION_SHORT[sp.position]})`}
-          </option>
-        ))}
+        {team.squad.map((sp) => {
+          const effectiveOption = computePlayerPositionRating(sp, slotGroup);
+          return (
+            <option key={sp.id} value={sp.id}>
+              {seeOwnRatings
+                ? `${sp.name} (${effectiveOption} ${POSITION_SHORT[sp.position]})`
+                : `${sp.name} (${POSITION_SHORT[sp.position]})`}
+            </option>
+          );
+        })}
       </select>
       {p && (
         <div className="mt-1 flex items-center gap-1">
@@ -431,12 +436,9 @@ function SlotChip({ team, slotIndex, slotGroup, onSwap, seeOwnRatings }: {
               <span className="text-[10px] text-lime-100/70">
                 PAS {Math.round(p.passing)} TIR {Math.round(p.shooting)} REG {Math.round(p.dribbling)} DEF {Math.round(p.defense)} FIS {Math.round(p.physical)} VEL {Math.round(p.pace)}
               </span>
-              <span className="text-[10px] font-bold text-lime-100/90">{p.overall}</span>
-              {oop && (
-                <span className="text-[10px] font-bold text-red-400" title={`Fuera de posición: ${POSITION_LABEL[p.position]} en slot ${GROUP_SHORT[slotGroup]}`}>
-                  → {effective}
-                </span>
-              )}
+              <span className="text-[10px] font-bold text-lime-100/90">
+                {oop ? `${p.overall} → ${effective}` : effective}
+              </span>
             </>
           ) : (
             oop && (
