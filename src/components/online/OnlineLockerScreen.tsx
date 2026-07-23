@@ -15,7 +15,7 @@
  */
 
 import { useMemo, useRef, useState } from "react";
-import { FORMATION_LIST, slotsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
+import { FORMATION_LIST, slotsFor, rowsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import { autoLineup } from "@/lib/football/bot";
 import { initMatch, computePlayerPositionRating } from "@/lib/football/engine";
 import {
@@ -141,6 +141,7 @@ function LockerInner({
   const canEdit = modo !== "roles" || esRolAlineacion;
 
   const slots = useMemo(() => slotsFor(team.formation), [team.formation]);
+  const rows = useMemo(() => rowsFor(team.formation), [team.formation]);
 
   function changeFormation(f: FormationName) {
     team.formation = f;
@@ -341,17 +342,17 @@ function LockerInner({
           </div>
 
           {/* Cancha */}
-          <div className="mt-5 rounded-2xl bg-pitch relative overflow-hidden" style={{ minHeight: 380 }}>
-            <div className="relative z-10 grid grid-rows-4 h-[380px] p-3 gap-1">
-              {(["FWD", "MID", "DEF", "GK"] as PositionGroup[]).map((rowPos) => {
-                const indexes = slots.map((s, i) => (slotGroupForPosition(s) === rowPos ? i : -1)).filter((i) => i >= 0);
-                if (indexes.length === 0) return null;
+          <div className="mt-5 rounded-2xl bg-pitch relative overflow-hidden" style={{ minHeight: rows.length >= 5 ? 440 : 380 }}>
+            <div className="relative z-10 grid p-3 gap-1" style={{ gridTemplateRows: `repeat(${rows.length}, 1fr)`, height: rows.length >= 5 ? 440 : 380 }}>
+              {[...rows.keys()].reverse().map((rowIdx) => {
+                const row = rows[rowIdx];
+                const offset = rows.slice(0, rowIdx).reduce((s, r) => s + r.length, 0);
                 return (
-                  <div key={rowPos} className="flex items-center justify-around gap-2">
-                    {indexes.map((i) => {
+                  <div key={rowIdx} className="flex items-center justify-around gap-2">
+                    {row.map((slotPosition, j) => {
+                      const i = offset + j;
                       const id = team.starting[i];
                       const p = team.squad.find((pp) => pp.id === id);
-                      const slotPosition = slots[i];
                       const effective = p ? computePlayerPositionRating(p, slotPosition) : 0;
                       const oop = p ? POSITION_GROUP[p.position] !== slotGroupForPosition(slotPosition) : false;
                       return (

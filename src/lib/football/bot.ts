@@ -5,34 +5,45 @@ import { POSITION_GROUP } from "./types";
 /**
  * Elige mejor alineación para una formación dada.
  * Devuelve array de 11 player ids ordenados según slotsFor(formation).
- * Agrupa jugadores por su grupo lógico (GK/DEF/MID/FWD).
- * Si no hay suficientes jugadores para un grupo, rellena con los mejores restantes.
+ * Prioridad: 1) coincidencia exacta de posición natural, 2) mismo grupo
+ * lógico (GK/DEF/MID/FWD), 3) cualquier jugador disponible como fallback.
  */
 export function autoLineup(squad: Player[], formation: FormationName): string[] {
-  const byGroup: Record<PositionGroup, Player[]> = {
-    GK: [], DEF: [], MID: [], FWD: [],
-  };
   const sorted = [...squad].sort((a, b) => b.overall - a.overall);
-  for (const p of sorted) byGroup[POSITION_GROUP[p.position]].push(p);
-
   const used = new Set<string>();
-  const slots = slotsFor(formation); // devuelve Position[]
-  const result: string[] = [];
-  for (const slot of slots) {
-    const group = slotGroupForPosition(slot);
-    const cand = byGroup[group as PositionGroup].find((p) => !used.has(p.id));
+  const slots = slotsFor(formation); // Position[]
+  const result: string[] = new Array(slots.length).fill("");
+
+  // Paso 1: coincidencia exacta de posición natural.
+  slots.forEach((slot, i) => {
+    const cand = sorted.find((p) => !used.has(p.id) && p.position === slot);
     if (cand) {
       used.add(cand.id);
-      result.push(cand.id);
-    } else {
-      // fallback: mejor jugador disponible
-      const fb = sorted.find((p) => !used.has(p.id));
-      if (fb) {
-        used.add(fb.id);
-        result.push(fb.id);
-      }
+      result[i] = cand.id;
     }
-  }
+  });
+
+  // Paso 2: mismo grupo lógico, mejor puntaje disponible.
+  slots.forEach((slot, i) => {
+    if (result[i]) return;
+    const group = slotGroupForPosition(slot);
+    const cand = sorted.find((p) => !used.has(p.id) && POSITION_GROUP[p.position] === group);
+    if (cand) {
+      used.add(cand.id);
+      result[i] = cand.id;
+    }
+  });
+
+  // Paso 3: fallback, cualquier jugador disponible.
+  slots.forEach((slot, i) => {
+    if (result[i]) return;
+    const fb = sorted.find((p) => !used.has(p.id));
+    if (fb) {
+      used.add(fb.id);
+      result[i] = fb.id;
+    }
+  });
+
   return result;
 }
 

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useGame } from "@/lib/football/store";
-import { FORMATION_LIST, slotsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
+import { FORMATION_LIST, slotsFor, rowsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import { autoLineup } from "@/lib/football/bot";
 import { computePlayerPositionRating } from "@/lib/football/engine";
 import {
@@ -52,6 +52,7 @@ export function LockerScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const slots = useMemo(() => slotsFor(team.formation), [team.formation]);
+  const rows = useMemo(() => rowsFor(team.formation), [team.formation]);
 
   function changeFormation(f: FormationName) {
     team.formation = f;
@@ -210,12 +211,17 @@ export function LockerScreen() {
 
         {/* Cancha visual con slots */}
         <div className="mt-5 rounded-2xl bg-pitch relative overflow-hidden border border-pitch/50"
-          style={{ minHeight: 420 }}>
+          style={{ minHeight: rows.length >= 5 ? 480 : 420 }}>
           <PitchLines />
-          <div className="relative z-10 grid grid-rows-4 h-[420px] p-3 gap-1">
-            {(["FWD", "MID", "DEF", "GK"] as PositionGroup[]).map((row) => (
-              <SlotRow key={row} team={team} slots={slots} rowPos={row} onSwap={swapSlot} seeOwnRatings={seeOwnRatings} />
-            ))}
+          <div className="relative z-10 grid p-3 gap-1" style={{ gridTemplateRows: `repeat(${rows.length}, 1fr)`, height: rows.length >= 5 ? 480 : 420 }}>
+            {[...rows.keys()].reverse().map((rowIdx) => {
+              const row = rows[rowIdx];
+              const offset = rows.slice(0, rowIdx).reduce((s, r) => s + r.length, 0);
+              const indexes = row.map((_, i) => offset + i);
+              return (
+                <SlotRow key={rowIdx} team={team} row={row} indexes={indexes} onSwap={swapSlot} seeOwnRatings={seeOwnRatings} />
+              );
+            })}
           </div>
         </div>
 
@@ -386,16 +392,15 @@ function IndividualRoles({ team, slots, onChange }: {
   );
 }
 
-function SlotRow({ team, slots, rowPos, onSwap, seeOwnRatings }: {
-  team: Team; slots: Position[]; rowPos: PositionGroup;
+function SlotRow({ team, row, indexes, onSwap, seeOwnRatings }: {
+  team: Team; row: Position[]; indexes: number[];
   onSwap: (slotIndex: number, newPlayerId: string) => void;
   seeOwnRatings: boolean;
 }) {
-  const indexes = slots.map((s, i) => (slotGroupForPosition(s) === rowPos ? i : -1)).filter((i) => i >= 0);
   return (
     <div className="flex items-center justify-around gap-2">
-      {indexes.map((i) => (
-        <SlotChip key={i} team={team} slotIndex={i} onSwap={onSwap} slotGroup={slots[i]} seeOwnRatings={seeOwnRatings} />
+      {indexes.map((slotIndex, i) => (
+        <SlotChip key={slotIndex} team={team} slotIndex={slotIndex} onSwap={onSwap} slotGroup={row[i]} seeOwnRatings={seeOwnRatings} />
       ))}
     </div>
   );

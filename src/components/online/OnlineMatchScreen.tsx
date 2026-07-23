@@ -20,7 +20,7 @@ import { possessionPct, computePlayerPositionRating } from "@/lib/football/engin
 import { confirmarSub, tickPartida } from "@/lib/online/server-fns";
 import { guardarAjustesPartida, guardarMatchState } from "@/lib/online/api";
 import { autoLineup } from "@/lib/football/bot";
-import { FORMATION_LIST, slotsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
+import { FORMATION_LIST, slotsFor, rowsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
 import type { Velocidad } from "@/lib/online/types";
 import type { BuildUp, FormationName, LineHeight, Position, PositionGroup, PressIntensity, Style, Team } from "@/lib/football/types";
@@ -273,6 +273,7 @@ function MatchTeamHeader({
 
 function LiveSlotGrid({ team, onChange }: { team: Team; onChange: () => void }) {
   const slots = slotsFor(team.formation);
+  const rows = rowsFor(team.formation);
   const onFieldPlayers = team.squad.filter((p) => p.onField && !p.redCarded);
 
   function swapSlot(slotIndex: number, newPlayerId: string) {
@@ -292,19 +293,18 @@ function LiveSlotGrid({ team, onChange }: { team: Team; onChange: () => void }) 
     onChange();
   }
 
-  const rows: PositionGroup[] = ["FWD", "MID", "DEF", "GK"];
   return (
-    <div className="rounded-xl bg-pitch overflow-hidden" style={{ minHeight: 220 }}>
-      <div className="relative grid grid-rows-4 h-[220px] p-2 gap-0.5">
-        {rows.map((rowPos) => {
-          const rowIndexes = slots.map((s, i) => (slotGroupForPosition(s) === rowPos ? i : -1)).filter((i) => i >= 0);
-          if (rowIndexes.length === 0) return null;
+    <div className="rounded-xl bg-pitch overflow-hidden" style={{ minHeight: rows.length >= 5 ? 270 : 220 }}>
+      <div className="relative grid p-2 gap-0.5" style={{ gridTemplateRows: `repeat(${rows.length}, 1fr)`, height: rows.length >= 5 ? 270 : 220 }}>
+        {[...rows.keys()].reverse().map((rowIdx) => {
+          const row = rows[rowIdx];
+          const offset = rows.slice(0, rowIdx).reduce((s, r) => s + r.length, 0);
           return (
-            <div key={rowPos} className="flex items-center justify-around gap-1">
-              {rowIndexes.map((slotIdx) => {
+            <div key={rowIdx} className="flex items-center justify-around gap-1">
+              {row.map((slotPosition, j) => {
+                const slotIdx = offset + j;
                 const playerId = team.starting[slotIdx];
                 const player = team.squad.find((p) => p.id === playerId);
-                const slotPosition = slots[slotIdx];
                 const effective = player ? computePlayerPositionRating(player, slotPosition) : 0;
                 const oop = player ? effective !== player.overall : false;
                 return (
