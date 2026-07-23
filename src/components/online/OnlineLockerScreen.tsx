@@ -207,6 +207,7 @@ function LockerInner({
     equipoListo(jugadores, 1, partida!.modo_coop_1, !!partida!.equipo_1);
 
   const starters = team.squad.filter((p) => team.starting.includes(p.id));
+  const seeOwnRatings = partida!.configuracion?.seeOwnRatings ?? true;
 
   return (
     <div className="min-h-screen bg-background text-foreground pb-28">
@@ -363,11 +364,16 @@ function LockerInner({
                             onChange={(e) => swapSlot(i, e.target.value)}
                             className="mt-1 w-full appearance-none rounded-lg bg-white/95 text-foreground text-xs font-medium px-2 py-1.5 shadow-md focus:outline-none focus:ring-2 focus:ring-primary"
                           >
-                            {team.squad.map((sp) => (
-                              <option key={sp.id} value={sp.id}>
-                                {sp.name} ({sp.position})
-                              </option>
-                            ))}
+                            {team.squad.map((sp) => {
+                              const effectiveOption = computePlayerPositionRating(sp, slotGroup);
+                              return (
+                                <option key={sp.id} value={sp.id}>
+                                  {seeOwnRatings
+                                    ? `${sp.name} (${effectiveOption} ${POSITION_SHORT[sp.position]})`
+                                    : `${sp.name} (${POSITION_SHORT[sp.position]})`}
+                                </option>
+                              );
+                            })}
                           </select>
                           <div className="text-[10px] text-lime-100/70 mt-0.5">
                             {oop ? <span className="text-red-400">{p?.overall ?? 0} → {effective}</span> : <span>{effective}</span>}
