@@ -59,8 +59,8 @@ export interface Player {
   redCarded: boolean;
   yellowCards: number;
   injured: boolean;
-  /** Grupo del slot asignado en la formación (GK/DEF/MID/FWD). Distinto de position (específica). */
-  fieldPosition?: PositionGroup;
+  /** Slot asignado en la formación: puede ser un grupo lógico (GK/DEF/MID/FWD) o una posición específica (LI/DFC/MC/DC/etc.). */
+  fieldPosition?: Position | PositionGroup;
   slotIndex?: number;
 }
 

@@ -20,7 +20,7 @@ import { possessionPct, computePlayerPositionRating } from "@/lib/football/engin
 import { confirmarSub, tickPartida } from "@/lib/online/server-fns";
 import { guardarAjustesPartida, guardarMatchState } from "@/lib/online/api";
 import { autoLineup } from "@/lib/football/bot";
-import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
+import { FORMATION_LIST, slotsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
 import type { Velocidad } from "@/lib/online/types";
 import type { BuildUp, FormationName, LineHeight, Position, PositionGroup, PressIntensity, Style, Team } from "@/lib/football/types";
@@ -297,26 +297,26 @@ function LiveSlotGrid({ team, onChange }: { team: Team; onChange: () => void }) 
     <div className="rounded-xl bg-pitch overflow-hidden" style={{ minHeight: 220 }}>
       <div className="relative grid grid-rows-4 h-[220px] p-2 gap-0.5">
         {rows.map((rowPos) => {
-          const rowIndexes = slots.map((s, i) => (s === rowPos ? i : -1)).filter((i) => i >= 0);
+          const rowIndexes = slots.map((s, i) => (slotGroupForPosition(s) === rowPos ? i : -1)).filter((i) => i >= 0);
           if (rowIndexes.length === 0) return null;
           return (
             <div key={rowPos} className="flex items-center justify-around gap-1">
               {rowIndexes.map((slotIdx) => {
                 const playerId = team.starting[slotIdx];
                 const player = team.squad.find((p) => p.id === playerId);
-                const slotGroup = slots[slotIdx]; // PositionGroup
-                const effective = player ? computePlayerPositionRating(player, slotGroup) : 0;
+                const slotPosition = slots[slotIdx];
+                const effective = player ? computePlayerPositionRating(player, slotPosition) : 0;
                 const oop = player ? effective !== player.overall : false;
                 return (
                   <label key={slotIdx} className="flex flex-col items-center text-center min-w-0 flex-1 max-w-[6rem]">
-                    <span className="text-[9px] uppercase tracking-wider text-lime-200/80">{GROUP_SHORT[slotGroup]}</span>
+                    <span className="text-[9px] uppercase tracking-wider text-lime-200/80">{POSITION_SHORT[slotPosition]}</span>
                     <select
                       value={playerId ?? ""}
                       onChange={(e) => swapSlot(slotIdx, e.target.value)}
                       className="mt-0.5 w-full appearance-none rounded bg-white/90 text-foreground text-[10px] font-medium px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary truncate"
                     >
                       {onFieldPlayers.map((p) => {
-                        const effectiveOption = computePlayerPositionRating(p, slotGroup);
+                        const effectiveOption = computePlayerPositionRating(p, slotPosition);
                         return (
                           <option key={p.id} value={p.id}>
                             {p.name} ({effectiveOption} {POSITION_SHORT[p.position]})

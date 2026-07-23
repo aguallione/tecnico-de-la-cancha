@@ -15,7 +15,7 @@
  */
 
 import { useMemo, useRef, useState } from "react";
-import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
+import { FORMATION_LIST, slotsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import { autoLineup } from "@/lib/football/bot";
 import { initMatch, computePlayerPositionRating } from "@/lib/football/engine";
 import {
@@ -344,20 +344,20 @@ function LockerInner({
           <div className="mt-5 rounded-2xl bg-pitch relative overflow-hidden" style={{ minHeight: 380 }}>
             <div className="relative z-10 grid grid-rows-4 h-[380px] p-3 gap-1">
               {(["FWD", "MID", "DEF", "GK"] as PositionGroup[]).map((rowPos) => {
-                const indexes = slots.map((s, i) => (s === rowPos ? i : -1)).filter((i) => i >= 0);
+                const indexes = slots.map((s, i) => (slotGroupForPosition(s) === rowPos ? i : -1)).filter((i) => i >= 0);
                 if (indexes.length === 0) return null;
                 return (
                   <div key={rowPos} className="flex items-center justify-around gap-2">
                     {indexes.map((i) => {
                       const id = team.starting[i];
                       const p = team.squad.find((pp) => pp.id === id);
-                      const slotGroup = slots[i]; // PositionGroup
-                      const effective = p ? computePlayerPositionRating(p, slotGroup) : 0;
-                      const oop = p ? POSITION_GROUP[p.position] !== slotGroup : false;
+                      const slotPosition = slots[i];
+                      const effective = p ? computePlayerPositionRating(p, slotPosition) : 0;
+                      const oop = p ? POSITION_GROUP[p.position] !== slotGroupForPosition(slotPosition) : false;
                       return (
                         <label key={i} className="flex flex-col items-center text-center max-w-[9rem] flex-1">
                           <span className="text-[10px] uppercase tracking-wider text-lime-200/80">
-                            {GROUP_SHORT[slotGroup]}
+                            {POSITION_SHORT[slotPosition]}
                           </span>
                           <select
                             value={id ?? ""}
@@ -365,7 +365,7 @@ function LockerInner({
                             className="mt-1 w-full appearance-none rounded-lg bg-white/95 text-foreground text-xs font-medium px-2 py-1.5 shadow-md focus:outline-none focus:ring-2 focus:ring-primary"
                           >
                             {team.squad.map((sp) => {
-                              const effectiveOption = computePlayerPositionRating(sp, slotGroup);
+                              const effectiveOption = computePlayerPositionRating(sp, slotPosition);
                               return (
                                 <option key={sp.id} value={sp.id}>
                                   {seeOwnRatings
@@ -474,14 +474,14 @@ function IndividualRoles({
   canEdit,
 }: {
   team: Team;
-  slots: PositionGroup[];
+  slots: Position[];
   onChange: () => void;
   canEdit: boolean;
 }) {
   const starters = team.starting
     .map((id, i) => {
       const p = team.squad.find((pp) => pp.id === id);
-      return p ? { p, fieldGroup: slots[i] } : null;
+      return p ? { p, fieldGroup: slotGroupForPosition(slots[i]) ?? "GK" } : null;
     })
     .filter(Boolean) as Array<{ p: Player; fieldGroup: PositionGroup }>;
 

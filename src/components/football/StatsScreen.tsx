@@ -1,6 +1,7 @@
 import { useGame } from "@/lib/football/store";
 import { computePlayerPositionRating, computePlayerRating, computeTeamRating } from "@/lib/football/engine";
 import { POSITION_GROUP } from "@/lib/football/types";
+import { slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import type { Team, PlayerMatchStats } from "@/lib/football/types";
 
 export function StatsScreen() {
@@ -185,7 +186,7 @@ function TeamCol({ team, align }: { team: Team; align: "left" | "right" }) {
 
 function GKCard({ team, shotsOnTargetReceived }: { team: Team; shotsOnTargetReceived: number }) {
   // fieldPosition contiene el PositionGroup del slot
-  const gk = team.squad.find((p) => p.fieldPosition === "GK" && team.starting.includes(p.id));
+  const gk = team.squad.find((p) => slotGroupForPosition(p.fieldPosition) === "GK" && team.starting.includes(p.id));
   if (!gk) return null;
   const effective = computePlayerPositionRating(gk, "GK");
   const oop = POSITION_GROUP[gk.position] !== "GK";
@@ -242,7 +243,7 @@ function PlayerRatings({ team, stats }: { team: Team; stats: Record<string, Play
         {starters.map((p) => {
           const ps = stats[p.id];
           const rating = computePlayerRating(p, ps);
-          const oop = p.fieldPosition ? POSITION_GROUP[p.position] !== p.fieldPosition : false;
+          const oop = p.fieldPosition ? POSITION_GROUP[p.position] !== slotGroupForPosition(p.fieldPosition) : false;
           return (
             <div key={p.id} className="flex items-center gap-2 text-sm">
               <span className="flex-1 truncate">

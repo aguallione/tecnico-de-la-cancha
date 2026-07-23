@@ -1,4 +1,4 @@
-import { FORMATION_LIST, FORMATIONS, slotsFor } from "./formations";
+import { FORMATION_LIST, FORMATIONS, slotsFor, slotGroup as slotGroupForPosition } from "./formations";
 import type { FormationName, Player, PositionGroup, Team } from "./types";
 import { POSITION_GROUP } from "./types";
 
@@ -16,10 +16,11 @@ export function autoLineup(squad: Player[], formation: FormationName): string[] 
   for (const p of sorted) byGroup[POSITION_GROUP[p.position]].push(p);
 
   const used = new Set<string>();
-  const slots = slotsFor(formation); // devuelve PositionGroup[]
+  const slots = slotsFor(formation); // devuelve Position[]
   const result: string[] = [];
-  for (const group of slots) {
-    const cand = byGroup[group].find((p) => !used.has(p.id));
+  for (const slot of slots) {
+    const group = slotGroupForPosition(slot);
+    const cand = byGroup[group as PositionGroup].find((p) => !used.has(p.id));
     if (cand) {
       used.add(cand.id);
       result.push(cand.id);

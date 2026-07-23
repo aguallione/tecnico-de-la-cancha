@@ -132,7 +132,8 @@ export function teamTacticalAdjustment(
     // Un rol solo aporta si corresponde al grupo de la posición que el jugador ocupa EN CANCHA.
     // fieldPosition contiene el PositionGroup del slot (GK/DEF/MID/FWD).
     const e = p.individualRole ? ROLE_TABLE[p.individualRole] : undefined;
-    if (!e || e.position !== (p.fieldPosition as PositionGroup)) continue;
+    const slotGroup = p.fieldPosition ? (p.fieldPosition in POSITION_GROUP ? POSITION_GROUP[p.fieldPosition as Position] : p.fieldPosition as PositionGroup) : undefined;
+    if (!e || slotGroup !== e.position) continue;
     atk += e.attack;
     def += e.defense;
   }

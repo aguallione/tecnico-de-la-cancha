@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useGame } from "@/lib/football/store";
-import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
+import { FORMATION_LIST, slotsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import { autoLineup } from "@/lib/football/bot";
 import { computePlayerPositionRating } from "@/lib/football/engine";
 import {
@@ -89,7 +89,7 @@ export function LockerScreen() {
     const groupMap: Record<PositionGroup, number> = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
     team.starting.forEach((id, i) => {
       const p = team.squad.find((pp) => pp.id === id);
-      const slotGroup = slots[i]; // slots es PositionGroup[]
+      const slotGroup = slotGroupForPosition(slots[i]) ?? "GK";
       if (p) groupMap[slotGroup] += 1;
     });
     if (groupMap.GK < 1) {
@@ -223,13 +223,13 @@ export function LockerScreen() {
         {(() => {
           const starters = team.starting.map((pid, i) => ({
             p: team.squad.find((pp) => pp.id === pid),
-            group: slots[i], // PositionGroup del slot
+            slotPosition: slots[i],
           })).filter((s) => s.p);
           // Fuera de posición = el grupo natural del jugador no coincide con el slot
-          const oopList = starters.filter((s) => POSITION_GROUP[s.p!.position] !== s.group);
+          const oopList = starters.filter((s) => POSITION_GROUP[s.p!.position] !== slotGroupForPosition(s.slotPosition));
           if (oopList.length === 0) return null;
               const baseAvg = Math.round(avg(starters.map((s) => s.p!.overall)));
-              const effAvg = Math.round(avg(starters.map((s) => computePlayerPositionRating(s.p!, s.group))));
+              const effAvg = Math.round(avg(starters.map((s) => computePlayerPositionRating(s.p!, s.slotPosition))));
               return (
                 <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3">
                   <div className="flex items-center gap-2 text-sm font-semibold text-red-300">
@@ -243,7 +243,7 @@ export function LockerScreen() {
                     )}
                   </div>
               <div className="mt-1 text-xs text-red-200/70">
-                {oopList.map((s) => `${s.p!.name} (${POSITION_SHORT[s.p!.position]}→${GROUP_SHORT[s.group]})`).join(" · ")}
+                {oopList.map((s) => `${s.p!.name} (${POSITION_SHORT[s.p!.position]}→${POSITION_SHORT[s.slotPosition]})`).join(" · ")}
               </div>
             </div>
           );
@@ -315,13 +315,13 @@ function RoleEffectBadge({ role }: { role: string | undefined }) {
 }
 
 function IndividualRoles({ team, slots, onChange }: {
-  team: Team; slots: PositionGroup[]; onChange: () => void;
+  team: Team; slots: Position[]; onChange: () => void;
 }) {
   // Titulares en el orden de la alineación, con su grupo de posición EN CANCHA (slot).
   const starters = team.starting
     .map((id, i) => {
       const p = team.squad.find((pp) => pp.id === id);
-      return p ? { p, fieldGroup: slots[i] } : null;
+      return p ? { p, fieldGroup: slotGroupForPosition(slots[i]) ?? "GK" } : null;
     })
     .filter(Boolean) as Array<{ p: Player; fieldGroup: PositionGroup }>;
 
@@ -387,11 +387,11 @@ function IndividualRoles({ team, slots, onChange }: {
 }
 
 function SlotRow({ team, slots, rowPos, onSwap, seeOwnRatings }: {
-  team: Team; slots: PositionGroup[]; rowPos: PositionGroup;
+  team: Team; slots: Position[]; rowPos: PositionGroup;
   onSwap: (slotIndex: number, newPlayerId: string) => void;
   seeOwnRatings: boolean;
 }) {
-  const indexes = slots.map((s, i) => (s === rowPos ? i : -1)).filter((i) => i >= 0);
+  const indexes = slots.map((s, i) => (slotGroupForPosition(s) === rowPos ? i : -1)).filter((i) => i >= 0);
   return (
     <div className="flex items-center justify-around gap-2">
       {indexes.map((i) => (
@@ -402,17 +402,18 @@ function SlotRow({ team, slots, rowPos, onSwap, seeOwnRatings }: {
 }
 
 function SlotChip({ team, slotIndex, slotGroup, onSwap, seeOwnRatings }: {
-  team: Team; slotIndex: number; slotGroup: PositionGroup;
+  team: Team; slotIndex: number; slotGroup: Position;
   onSwap: (slotIndex: number, newPlayerId: string) => void;
   seeOwnRatings: boolean;
 }) {
   const id = team.starting[slotIndex];
   const p = team.squad.find((pp) => pp.id === id);
   const effective = p ? computePlayerPositionRating(p, slotGroup) : 0;
-  const oop = p ? effective !== p.overall : false;
+  const slotGroupName = slotGroupForPosition(slotGroup);
+  const oop = p ? (slotGroupName !== POSITION_GROUP[p.position]) : false;
   return (
     <label className="relative flex flex-col items-center text-center max-w-[9rem]">
-      <span className="text-[10px] uppercase tracking-wider text-lime-200/80">{GROUP_SHORT[slotGroup]}</span>
+      <span className="text-[10px] uppercase tracking-wider text-lime-200/80">{POSITION_SHORT[slotGroup]}</span>
       <select
         value={id ?? ""}
         onChange={(e) => onSwap(slotIndex, e.target.value)}
@@ -442,7 +443,7 @@ function SlotChip({ team, slotIndex, slotGroup, onSwap, seeOwnRatings }: {
             </>
           ) : (
             oop && (
-              <span className="text-[10px] font-bold text-red-400" title={`Fuera de posición: ${POSITION_LABEL[p.position]} en slot ${GROUP_SHORT[slotGroup]}`}>
+              <span className="text-[10px] font-bold text-red-400" title={`Fuera de posición: ${POSITION_LABEL[p.position]} en slot ${POSITION_SHORT[slotGroup]}`}>
                 ⚠ Fuera de pos.
               </span>
             )

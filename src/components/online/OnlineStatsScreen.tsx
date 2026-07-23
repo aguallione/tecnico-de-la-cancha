@@ -12,6 +12,7 @@ import { useOnlineGame } from "@/lib/online/store";
 import { deserializeMatchState } from "@/lib/football/serialization";
 import { computePlayerRating, computePlayerPositionRating, computeTeamRating } from "@/lib/football/engine";
 import { POSITION_GROUP } from "@/lib/football/types";
+import { slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import type { Team, PlayerMatchStats } from "@/lib/football/types";
 import { cerrarPartida, reiniciarPartida } from "@/lib/online/api";
 import { OnlineHeader } from "@/components/online/OnlineHeader";
@@ -199,7 +200,7 @@ function PlayerRatings({
         {starters.map((p) => {
           const ps = stats[p.id];
           const rating = computePlayerRating(p, ps);
-          const oop = p.fieldPosition ? POSITION_GROUP[p.position] !== p.fieldPosition : false;
+          const oop = p.fieldPosition ? POSITION_GROUP[p.position] !== slotGroupForPosition(p.fieldPosition) : false;
           return (
             <div key={p.id} className="flex items-center gap-2 text-sm">
               <span className="flex-1 truncate">
