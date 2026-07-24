@@ -1,54 +1,43 @@
 import { FORMATION_LIST, FORMATIONS, slotsFor, slotGroup as slotGroupForPosition } from "./formations";
+import { computePlayerPositionRating } from "./engine";
 import type { FormationName, Player, PositionGroup, Team } from "./types";
 import { POSITION_GROUP } from "./types";
 
 /**
- * Elige mejor alineación para una formación dada.
+ * Elige la mejor alineación posible para una formación dada, maximizando la
+ * suma total de valoración de los 11 (cada jugador evaluado con su fórmula
+ * de posición real en cada puesto, incluyendo el bonus de posición natural).
  * Devuelve array de 11 player ids ordenados según slotsFor(formation).
- * Prioridad: 1) coincidencia exacta de posición natural, 2) mismo grupo
- * lógico (GK/DEF/MID/FWD), 3) cualquier jugador disponible como fallback.
  */
 export function autoLineup(squad: Player[], formation: FormationName): string[] {
-  const sorted = [...squad].sort((a, b) => b.overall - a.overall);
-  const used = new Set<string>();
   const slots = slotsFor(formation); // Position[]
   const result: string[] = new Array(slots.length).fill("");
+  const usedPlayers = new Set<string>();
+  const filledSlots = new Set<number>();
 
-  // Paso 1: coincidencia exacta de posición natural.
-  slots.forEach((slot, i) => {
-    const cand = sorted.find((p) => !used.has(p.id) && p.position === slot);
-    if (cand) {
-      used.add(cand.id);
-      result[i] = cand.id;
+  // Todas las combinaciones posibles (puesto, jugador) con su valoración real.
+  const pairs: { slotIndex: number; playerId: string; rating: number }[] = [];
+  slots.forEach((slot, slotIndex) => {
+    for (const p of squad) {
+      pairs.push({ slotIndex, playerId: p.id, rating: computePlayerPositionRating(p, slot) });
     }
   });
 
-  // Paso 2: mismo grupo lógico, mejor puntaje disponible.
-  slots.forEach((slot, i) => {
-    if (result[i]) return;
-    const group = slotGroupForPosition(slot);
-    const cand = sorted.find((p) => !used.has(p.id) && POSITION_GROUP[p.position] === group);
-    if (cand) {
-      used.add(cand.id);
-      result[i] = cand.id;
-    }
-  });
-
-  // Paso 3: fallback, cualquier jugador disponible.
-  slots.forEach((slot, i) => {
-    if (result[i]) return;
-    const fb = sorted.find((p) => !used.has(p.id));
-    if (fb) {
-      used.add(fb.id);
-      result[i] = fb.id;
-    }
-  });
+  // De mayor a menor valoración: nos quedamos con la primera pareja disponible
+  // (ni el puesto ni el jugador usados todavía), repitiendo hasta llenar todo.
+  pairs.sort((a, b) => b.rating - a.rating);
+  for (const pair of pairs) {
+    if (filledSlots.size === slots.length) break;
+    if (filledSlots.has(pair.slotIndex) || usedPlayers.has(pair.playerId)) continue;
+    result[pair.slotIndex] = pair.playerId;
+    filledSlots.add(pair.slotIndex);
+    usedPlayers.add(pair.playerId);
+  }
 
   return result;
 }
 
 export function autoBotTeam(team: Team): void {
-  // Elegir formación al azar entre razonables
   const formation = FORMATION_LIST[Math.floor(Math.random() * FORMATION_LIST.length)];
   team.formation = formation;
   team.starting = autoLineup(team.squad, formation);
