@@ -3,6 +3,7 @@ import { AuthProvider } from "@/hooks/use-auth";
 import { GameProvider, useGame } from "@/lib/football/store";
 import { OnlineGameProvider, useOnlineGame } from "@/lib/online/store";
 import { HomeScreen, ManualScreen } from "@/components/football/HomeScreen";
+import { LocalHeader } from "@/components/football/LocalHeader";
 import { SetupScreen } from "@/components/football/SetupScreen";
 import { HandoffScreen } from "@/components/football/HandoffScreen";
 import { LockerScreen } from "@/components/football/LockerScreen";
@@ -56,6 +57,15 @@ function OnlineRouter({ screen }: { screen: string }) {
 }
 
 function LocalRouter({ screen }: { screen: string }) {
+  return (
+    <>
+      <LocalHeader />
+      <LocalScreenSwitch screen={screen} />
+    </>
+  );
+}
+
+function LocalScreenSwitch({ screen }: { screen: string }) {
   switch (screen) {
     case "home": return <HomeScreen />;
     case "manual": return <ManualScreen />;
