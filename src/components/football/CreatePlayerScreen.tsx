@@ -129,15 +129,6 @@ export function CreatePlayerScreen({ onPlayerCreated, onCancel }: Props) {
     return computePlayerPositionRating(player, isPOR ? "GK" : group);
   }, [position, overall, attrs, gkAttrs, group, isPOR]);
 
-  const totalGastado = useMemo(
-    () => attrs.passing + attrs.shooting + attrs.dribbling + attrs.defense + attrs.physical + attrs.pace,
-    [attrs],
-  );
-
-  const presupuesto = objetivo * 6;
-  const restante = presupuesto - totalGastado;
-  const excedido = totalGastado > presupuesto;
-
   function ajustarAttr(key: string, valor: number) {
     const clamped = Math.max(1, Math.min(99, Math.round(valor)));
     setAttrs((prev) => ({ ...prev, [key]: clamped }));
@@ -149,8 +140,7 @@ export function CreatePlayerScreen({ onPlayerCreated, onCancel }: Props) {
   }
 
   function autoRepartir() {
-    const base = Math.floor(presupuesto / 6);
-    const resto = presupuesto - base * 6;
+    const base = objetivo;
     const distribuir: Record<string, number> = {};
     const orden = [...ATTRS.map((a) => a.key)];
 
@@ -167,10 +157,6 @@ export function CreatePlayerScreen({ onPlayerCreated, onCancel }: Props) {
     for (const key of orden) {
       const val = base + (bonus[key] ?? 0);
       distribuir[key] = Math.max(1, Math.min(99, val));
-    }
-    const claveIdx = orden.findIndex((k) => Math.abs(bonus[k] ?? 0) > 5);
-    if (claveIdx >= 0 && resto > 0) {
-      distribuir[orden[claveIdx]] = Math.min(99, distribuir[orden[claveIdx]] + resto);
     }
     setAttrs(distribuir);
 
@@ -279,18 +265,9 @@ export function CreatePlayerScreen({ onPlayerCreated, onCancel }: Props) {
         </div>
       </div>
 
-      {/* Presupuesto de puntos */}
-      <div className="rounded-lg border border-border bg-muted/40 p-3">
-        <div className="flex items-center justify-between text-sm">
-          <span>Presupuesto: <strong>{presupuesto}</strong> pts</span>
-          <span className={excedido ? "text-destructive" : restante < 6 ? "text-yellow-500" : "text-primary"}>
-            Gastado: <strong>{totalGastado}</strong> · Restante: <strong>{restante}</strong>
-          </span>
-        </div>
-        <button onClick={autoRepartir} className="btn-ghost text-xs mt-2 py-1 px-3">
-          Repartir automáticamente por posición
-        </button>
-      </div>
+      <button onClick={autoRepartir} className="btn-ghost text-xs">
+        Repartir automáticamente por posición
+      </button>
 
       {/* Sliders de atributos */}
       <div className="space-y-3">
@@ -334,16 +311,10 @@ export function CreatePlayerScreen({ onPlayerCreated, onCancel }: Props) {
       {/* General resultante */}
       <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 p-3">
         <span className="text-sm text-muted-foreground">General resultante</span>
-        <span className={`font-display text-2xl font-black ${excedido ? "text-destructive" : "text-primary"}`}>
+        <span className="font-display text-2xl font-black text-primary">
           {effectiveRating}
         </span>
       </div>
-
-      {excedido && (
-        <p className="text-xs text-destructive">
-          La suma de atributos ({totalGastado}) supera el presupuesto ({presupuesto}). Reducí algunos atributos.
-        </p>
-      )}
 
       {/* Acciones */}
       <div className="flex gap-3">
@@ -352,7 +323,7 @@ export function CreatePlayerScreen({ onPlayerCreated, onCancel }: Props) {
         </button>
         <button
           onClick={guardar}
-          disabled={!name.trim() || excedido}
+          disabled={!name.trim()}
           className="btn-primary flex-1 disabled:opacity-50"
         >
           Crear jugador
