@@ -14,7 +14,7 @@
  */
 
 import { useState } from "react";
-import { X } from "lucide-react";
+import { X, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 
 interface Props {
@@ -34,6 +34,7 @@ export function AuthModal({ open, onClose, onSuccess, reason }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmMessage, setConfirmMessage] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   if (!open) return null;
 
@@ -177,16 +178,26 @@ export function AuthModal({ open, onClose, onSuccess, reason }: Props) {
               <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
                 Contraseña
               </label>
-              <input
-                type="password"
-                autoComplete={formMode === "login" ? "current-password" : "new-password"}
-                className="input w-full"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={6}
-                disabled={loading}
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete={formMode === "login" ? "current-password" : "new-password"}
+                  className="input w-full pr-10"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
               {formMode === "register" && (
                 <p className="mt-1 text-[11px] text-muted-foreground">Mínimo 6 caracteres.</p>
               )}
