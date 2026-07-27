@@ -1,4 +1,5 @@
-import type { Player, Position } from "./types";
+import type { Player, Position, PositionGroup } from "./types";
+import { POSITION_GROUP } from "./types";
 
 const FIRST = [
   "Juan","Diego","Carlos","Martín","Facundo","Nicolás","Sebastián","Lucas","Mateo","Franco",
@@ -30,7 +31,8 @@ function attributesFor(pos: Position, base: number) {
   let defense = base + jitter();
   let physical = base + jitter();
   let pace = base + jitter();
-  switch (pos) {
+  const group: PositionGroup = POSITION_GROUP[pos];
+  switch (group) {
     case "GK":
       defense += 12; shooting -= 25; pace -= 8; passing -= 6; dribbling -= 18; physical += 4;
       break;
@@ -45,7 +47,7 @@ function attributesFor(pos: Position, base: number) {
       break;
   }
   const clamp = (n: number) => Math.max(30, Math.min(99, n));
-  return {
+  const base6 = {
     passing: clamp(passing),
     shooting: clamp(shooting),
     dribbling: clamp(dribbling),
@@ -53,17 +55,37 @@ function attributesFor(pos: Position, base: number) {
     physical: clamp(physical),
     pace: clamp(pace),
   };
+  // Atributos exclusivos de arquero
+  if (group === "GK") {
+    return {
+      ...base6,
+      gkDiving: clamp(base + rand(-6, 10)),
+      gkHandling: clamp(base + rand(-6, 10)),
+      gkKicking: clamp(base + rand(-10, 6)),
+      gkReflexes: clamp(base + rand(-6, 10)),
+      gkPositioning: clamp(base + rand(-6, 8)),
+    };
+  }
+  return base6;
 }
 
+/**
+ * Distribución de 23 slots (recortada al tamaño pedido):
+ * 3 POR, 2 DFC, 1 LI, 1 LD, 1 CAI, 1 CAD, 1 MCD, 2 MC, 1 MI, 1 MD, 1 MCO,
+ * 2 DC, 1 SD, 1 EI, 1 ED → total 20 base.
+ * Para size > 20 se repiten los puestos de campo más comunes.
+ */
+const SQUAD_TEMPLATE: Position[] = [
+  "POR", "POR", "POR",
+  "DFC", "DFC", "LI", "LD", "CAI", "CAD",
+  "MCD", "MC", "MC", "MI", "MD", "MCO",
+  "DC", "DC", "SD", "EI", "ED",
+  // Extra slots si size > 20
+  "MC", "DFC", "SD",
+];
+
 export function generateSquad(size = 20): Player[] {
-  // Distribución: 3 GK, 7 DEF, 7 MID, 6 FWD por defecto (recortada al tamaño)
-  const template: Position[] = [
-    "GK","GK","GK",
-    "DEF","DEF","DEF","DEF","DEF","DEF","DEF",
-    "MID","MID","MID","MID","MID","MID","MID",
-    "FWD","FWD","FWD","FWD","FWD","FWD",
-  ];
-  const positions = template.slice(0, size);
+  const positions = SQUAD_TEMPLATE.slice(0, size) as Position[];
   return positions.map((pos) => {
     const base = rand(55, 88);
     const attrs = attributesFor(pos, base);

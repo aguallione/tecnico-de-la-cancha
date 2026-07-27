@@ -1,12 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/lib/football/store";
-import { initMatch, substitute, tickMinute, possessionPct, outOfPositionFactor, type MatchState } from "@/lib/football/engine";
+import { initMatch, substitute, tickMinute, possessionPct, computePlayerPositionRating, type MatchState } from "@/lib/football/engine";
 import { autoLineup } from "@/lib/football/bot";
-import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
+import { FORMATION_LIST, slotsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
-import type { BuildUp, FormationName, LineHeight, Player, Position, PressIntensity, Style, Team } from "@/lib/football/types";
+import type { BuildUp, FormationName, LineHeight, Player, Position, PositionGroup, PressIntensity, Style, Team } from "@/lib/football/types";
+import { POSITION_GROUP } from "@/lib/football/types";
 
-const POSITION_SHORT: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
+const POSITION_SHORT: Record<Position, string> = {
+  POR: "POR",
+  DFC: "DFC", LI: "LI", LD: "LD", CAI: "CAI", CAD: "CAD",
+  MCD: "MCD", MC: "MC", MI: "MI", MD: "MD", MCO: "MCO",
+  DC: "DC", SD: "SD", EI: "EI", ED: "ED",
+};
+const GROUP_SHORT: Record<PositionGroup, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
 
 // Emergency formation used when a player is sent off
 const EMERGENCY_FORMATION: FormationName = "5-3-2";
@@ -267,50 +274,52 @@ function LiveSlotGrid({ team, onChange }: { team: Team; onChange: () => void }) 
     for (const p of team.squad) {
       const idx = team.starting.indexOf(p.id);
       if (idx >= 0 && p.onField && !p.redCarded) {
-        p.fieldPosition = slots[idx] as Position;
+        p.fieldPosition = slots[idx]; // slots devuelve PositionGroup[]
         p.slotIndex = idx;
       }
     }
     onChange();
   }
 
-  const rows: Position[] = ["FWD", "MID", "DEF", "GK"];
+  const rows: PositionGroup[] = ["FWD", "MID", "DEF", "GK"];
   return (
     <div className="rounded-xl bg-pitch overflow-hidden" style={{ minHeight: 220 }}>
       <div className="relative grid grid-rows-4 h-[220px] p-2 gap-0.5">
         {rows.map((rowPos) => {
-          const rowIndexes = slots.map((s, i) => (s === rowPos ? i : -1)).filter((i) => i >= 0);
+          const rowIndexes = slots.map((s, i) => (slotGroupForPosition(s) === rowPos ? i : -1)).filter((i) => i >= 0);
           if (rowIndexes.length === 0) return null;
           return (
             <div key={rowPos} className="flex items-center justify-around gap-1">
               {rowIndexes.map((slotIdx) => {
                 const playerId = team.starting[slotIdx];
                 const player = team.squad.find((p) => p.id === playerId);
-                const slotPos = slots[slotIdx] as Position;
-                const factor = player ? outOfPositionFactor({ ...player, fieldPosition: slotPos }) : 1;
-                const oop = player && factor < 1;
-                const effective = player ? Math.round(player.overall * factor) : 0;
+                const slotPosition = slots[slotIdx];
+                const effective = player ? computePlayerPositionRating(player, slotPosition) : 0;
+                const oop = player ? effective !== player.overall : false;
                 return (
                   <label key={slotIdx} className="flex flex-col items-center text-center min-w-0 flex-1 max-w-[6rem]">
-                    <span className="text-[9px] uppercase tracking-wider text-lime-200/80">{POSITION_SHORT[slotPos]}</span>
+                    <span className="text-[9px] uppercase tracking-wider text-lime-200/80">{POSITION_SHORT[slotPosition]}</span>
                     <select
                       value={playerId ?? ""}
                       onChange={(e) => swapSlot(slotIdx, e.target.value)}
                       className="mt-0.5 w-full appearance-none rounded bg-white/90 text-foreground text-[10px] font-medium px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary truncate"
                     >
                       {/* Solo jugadores que ya están en cancha — sin banco */}
-                      {onFieldPlayers.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({p.overall} {POSITION_SHORT[p.position]})
-                        </option>
-                      ))}
+                      {onFieldPlayers.map((p) => {
+                        const effectiveOption = computePlayerPositionRating(p, slotPosition);
+                        return (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({effectiveOption} {POSITION_SHORT[p.position]})
+                          </option>
+                        );
+                      })}
                     </select>
                     {player && (
                       <div className="text-[9px] text-lime-100/70 mt-0.5">
                         {oop ? (
                           <span className="text-red-400">{player.overall} &rarr; {effective}</span>
                         ) : (
-                          <span>{player.overall}</span>
+                          <span>{effective}</span>
                         )}
                       </div>
                     )}
@@ -462,7 +471,10 @@ function TacticsPanel({ teamIdx, state, onClose, onChange }: {
               </select>
               <select className="input" value={subInId} onChange={(e) => setSubInId(e.target.value)}>
                 <option value="">Entra...</option>
-                {bench.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.position} {p.overall})</option>)}
+                {bench.map((p) => {
+                  const effectiveOption = computePlayerPositionRating(p, p.position === "POR" ? "GK" : POSITION_GROUP[p.position]);
+                  return <option key={p.id} value={p.id}>{p.name} ({effectiveOption} {p.position})</option>;
+                })}
               </select>
             </div>
             <button

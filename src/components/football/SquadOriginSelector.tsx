@@ -17,6 +17,7 @@ import { useRef, useState } from "react";
 import { Trash2, RefreshCw, LogIn, Plus } from "lucide-react";
 import type { Player } from "@/lib/football/types";
 import { generateSquad } from "@/lib/football/players";
+import { migrateSquadFull } from "@/lib/football/migration";
 import { searchTeams, fetchSquad } from "@/lib/football/api-football";
 import { useEquiposGuardados } from "@/hooks/use-equipos-guardados";
 import { useAuth } from "@/hooks/use-auth";
@@ -31,7 +32,21 @@ interface Props {
 
 // ─── Validación de plantel cargado desde archivo ───────────────────────────────
 
-const VALID_POSITIONS = new Set(["GK", "DEF", "MID", "FWD"]);
+/** Posiciones específicas válidas (sistema nuevo de 15) más los alias del sistema viejo (4). */
+const VALID_POSITIONS = new Set([
+  // Sistema nuevo (15)
+  "POR",
+  "DFC", "LI", "LD", "CAI", "CAD",
+  "MCD", "MC", "MI", "MD", "MCO",
+  "DC", "SD", "EI", "ED",
+  // Aliases viejos que se migran automáticamente
+  "GK", "DEF", "MID", "FWD",
+]);
+
+/** Mapeo de posiciones viejas (4) a posiciones nuevas (15) para JSON importados. */
+const LEGACY_POS_MAP: Record<string, Player["position"]> = {
+  GK: "POR", DEF: "DFC", MID: "MC", FWD: "DC",
+};
 
 function validateSquad(raw: unknown): Player[] {
   if (!Array.isArray(raw)) throw new Error("El archivo debe contener un array JSON.");
@@ -46,11 +61,13 @@ function validateSquad(raw: unknown): Player[] {
     const name = typeof p.name === "string" && p.name.trim() ? p.name.trim() : null;
     if (!name) throw new Error(`Jugador ${i + 1}: falta "name".`);
 
-    const pos = typeof p.position === "string" ? p.position.toUpperCase() : null;
-    if (!pos || !VALID_POSITIONS.has(pos))
+    const rawPos = typeof p.position === "string" ? p.position.toUpperCase() : null;
+    if (!rawPos || !VALID_POSITIONS.has(rawPos))
       throw new Error(
-        `Jugador ${i + 1} (${name}): posición inválida "${p.position}". Válidos: GK, DEF, MID, FWD.`,
+        `Jugador ${i + 1} (${name}): posición inválida "${p.position}". Válidos: POR, DFC, LI, LD, CAI, CAD, MCD, MC, MI, MD, MCO, DC, SD, EI, ED.`,
       );
+    // Migrar posición vieja → nueva si es alias legacy
+    const pos: Player["position"] = (LEGACY_POS_MAP[rawPos] ?? rawPos) as Player["position"];
 
     const toNum = (key: string, min: number, max: number, fallback: number): number => {
       const v = Number(p[key]);
@@ -72,7 +89,7 @@ function validateSquad(raw: unknown): Player[] {
     return {
       id: `file_${i}_${Date.now().toString(36)}`,
       name,
-      position: pos as Player["position"],
+      position: pos,
       overall,
       passing,
       shooting,
@@ -527,7 +544,7 @@ function CreateMode({
   onReady,
   onSquadReady,
 }: {
-  onReady: (label: string) => void;
+  onReady: (label: string | null) => void;
   onSquadReady: (squad: Player[]) => void;
 }) {
   const [squad, setSquad] = useState<Player[]>([]);

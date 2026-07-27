@@ -1,12 +1,19 @@
 import { useState } from "react";
 import { useGame, makeTeam } from "@/lib/football/store";
-import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
+import { FORMATION_LIST, slotsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import { autoLineup } from "@/lib/football/bot";
-import { outOfPositionFactor } from "@/lib/football/engine";
+import { computePlayerPositionRating } from "@/lib/football/engine";
 import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
-import type { BuildUp, FormationName, LineHeight, Player, Position, PressIntensity, Team } from "@/lib/football/types";
+import type { BuildUp, FormationName, LineHeight, Player, Position, PositionGroup, PressIntensity, Team } from "@/lib/football/types";
+import { POSITION_GROUP } from "@/lib/football/types";
 
-const POSITION_SHORT: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
+const POSITION_SHORT: Record<Position, string> = {
+  POR: "POR",
+  DFC: "DFC", LI: "LI", LD: "LD", CAI: "CAI", CAD: "CAD",
+  MCD: "MCD", MC: "MC", MI: "MI", MD: "MD", MCO: "MCO",
+  DC: "DC", SD: "SD", EI: "EI", ED: "ED",
+};
+const GROUP_SHORT: Record<PositionGroup, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
 
 export function TestScreen() {
   const { setTeams, setScreen, settings, setTestMode } = useGame();
@@ -84,9 +91,9 @@ function TeamSetup({ team, label, onSwap, onFormation, onChange }: {
 }) {
   const slots = slotsFor(team.formation);
   const starters = team.squad.filter((p) => team.starting.includes(p.id));
-  const oopCount = starters.filter((p, i) => p.position !== slots[i]).length;
+  const oopCount = starters.filter((p, i) => POSITION_GROUP[p.position] !== slotGroupForPosition(slots[i])).length;
   const baseAvg = Math.round(starters.reduce((s, p) => s + p.overall, 0) / 11);
-  const effAvg = Math.round(starters.reduce((s, p, i) => s + p.overall * outOfPositionFactor({ ...p, fieldPosition: slots[i] }), 0) / 11);
+  const effAvg = Math.round(starters.reduce((s, p, i) => s + computePlayerPositionRating(p, slots[i]), 0) / 11);
 
   return (
     <div className="card p-4">
@@ -154,29 +161,31 @@ function TeamSetup({ team, label, onSwap, onFormation, onChange }: {
       </div>
 
       <div className="mt-3 space-y-1.5">
-        {slots.map((slotPos, i) => {
+        {slots.map((slotGroup, i) => {
           const p = team.squad.find((pp) => pp.id === team.starting[i]);
           if (!p) return null;
-          const factor = outOfPositionFactor({ ...p, fieldPosition: slotPos });
-          const oop = factor < 1;
-          const effective = Math.round(p.overall * factor);
+          const effective = computePlayerPositionRating(p, slotGroup);
+          const oop = effective !== p.overall;
           return (
             <div key={i} className="flex items-center gap-2 text-sm">
-              <span className="text-xs font-bold w-10 text-muted-foreground">{POSITION_SHORT[slotPos]}</span>
+              <span className="text-xs font-bold w-10 text-muted-foreground">{POSITION_SHORT[slotGroup]}</span>
               <select
                 className="input flex-1 text-xs"
                 value={p.id}
                 onChange={(e) => onSwap(i, e.target.value)}
               >
-                {team.squad.map((sp) => (
-                  <option key={sp.id} value={sp.id}>
-                    {sp.name} ({sp.overall} {POSITION_SHORT[sp.position]})
-                  </option>
-                ))}
+                {team.squad.map((sp) => {
+                  const effectiveOption = computePlayerPositionRating(sp, slotGroup);
+                  return (
+                    <option key={sp.id} value={sp.id}>
+                      {sp.name} ({effectiveOption} {POSITION_SHORT[sp.position]})
+                    </option>
+                  );
+                })}
               </select>
-              <span className="font-display font-bold tabular-nums w-8 text-right">{p.overall}</span>
-              {oop && <span className="font-display font-bold tabular-nums w-8 text-right text-red-500">{effective}</span>}
-              {!oop && <span className="w-8" />}
+              <span className="font-display font-bold tabular-nums w-8 text-right">
+                {oop ? `${p.overall} → ${effective}` : effective}
+              </span>
             </div>
           );
         })}

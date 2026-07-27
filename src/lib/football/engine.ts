@@ -1,5 +1,6 @@
-import type { MatchEvent, MatchSettings, MatchStats, Player, PlayerMatchStats, Position, Team } from "./types";
-import { formationMatchup, slotsFor } from "./formations";
+import type { MatchEvent, MatchSettings, MatchStats, Player, PlayerMatchStats, Position, PositionGroup, Team } from "./types";
+import { POSITION_GROUP } from "./types";
+import { formationMatchup, slotsFor, slotGroup as slotGroupForPosition } from "./formations";
 import { BUILDUP_TABLE, PRESS_TABLE, teamTacticalAdjustment } from "./tactics";
 import * as C from "./commentary";
 
@@ -30,11 +31,11 @@ function pick<T>(a: T[]): T { return a[Math.floor(Math.random() * a.length)]; }
 
 /**
  * Peso relativo de probabilidad de que un jugador remate/convierta un gol,
- * según su posición EN CANCHA (no la natural). Refleja el fútbol real:
+ * según su grupo lógico EN CANCHA (no la natural). Refleja el fútbol real:
  * delanteros > mediocampistas > defensores > arqueros.
  * El arquero tiene un peso ínfimo (≈ penal de emergencia): prácticamente nunca convierte.
  */
-function scorerWeight(fieldPos: Position | undefined): number {
+function scorerWeight(fieldPos: PositionGroup | undefined): number {
   switch (fieldPos) {
     case "FWD": return 1.0;
     case "MID": return 0.5;
@@ -59,34 +60,90 @@ function weightedPick<T>(items: T[], weight: (t: T) => number): T | undefined {
 }
 
 /**
- * Penalización por jugar fuera de posición.
- * Devuelve un multiplicador (0..1) que se aplica a los atributos efectivos.
- *
- * - Cualquier jugador de campo puesto de arquero: -35% (atajar es una
- *   habilidad totalmente distinta).
- * - Arquero puesto de campo: -35% (mismo motivo, inverso).
- * - Puestos de campo vecinos (DEF↔MID, MID↔FWD): -12% (roles parecidos).
- * - Puestos de campo extremos (DEF↔FWD): -25% (roles muy distintos).
+ * Ajuste interno para el motor de simulación.
+ * Se mantiene solo en el engine para preservar el comportamiento previo de eventos.
  */
-export function outOfPositionFactor(player: Player): number {
-  if (!player.fieldPosition || player.fieldPosition === player.position) return 1;
-  const nat = player.position;
-  const field = player.fieldPosition;
-  // Arquero vs campo: siempre penalización máxima
-  if (nat === "GK" || field === "GK") return 0.65;
-  // Puestos de campo: por distancia en la línea DEF-MID-FWD
-  const order: Position[] = ["DEF", "MID", "FWD"];
-  const dist = Math.abs(order.indexOf(nat) - order.indexOf(field));
-  if (dist === 1) return 0.88; // vecinos
-  return 0.75; // dist === 2: extremos
+function positionRatingFactor(player: Player): number {
+  if (!player.fieldPosition) return 1;
+  const effective = computePlayerPositionRating(player, player.fieldPosition);
+  return player.overall ? Math.max(0.1, Math.min(1.5, effective / player.overall)) : 1;
 }
+
+/**
+ * Calcula la valoración general del jugador según la posición del slot en la alineación.
+ * Esta función reemplaza completamente la lógica de penalización porcentual por fuera de posición.
+ */
+export function computePlayerPositionRating(player: Player, fieldPosition?: PositionGroup | Position): number {
+  const slot = fieldPosition ?? player.fieldPosition;
+  if (!slot) return player.overall;
+
+  if (slot === "GK" || slot === "POR") {
+    if (player.position !== "POR") return 30;
+    const div = player.gkDiving ?? 0;
+    const par = player.gkHandling ?? 0;
+    const sac = player.gkKicking ?? 0;
+    const ref = player.gkReflexes ?? 0;
+    const vel = player.pace;
+    const pos = player.gkPositioning ?? 0;
+    return Math.round(Math.max(1, Math.min(99, 0.15 * div + 0.20 * par + 0.10 * sac + 0.25 * ref + 0.05 * vel + 0.25 * pos)));
+  }
+
+  const formula = getFieldPositionFormula(player.position, slot);
+  const base = formula(player);
+  const bonus = slot === player.position ? 1 : 0;
+  return Math.max(1, Math.min(99, Math.round(base + bonus)));
+}
+
+function getFieldPositionFormula(position: Position, slotPosition: Position | PositionGroup | undefined) {
+  if (slotPosition === "DFC") return defenderCenterFormula;
+  if (slotPosition === "LI" || slotPosition === "LD") return fullbackFormula;
+  if (slotPosition === "CAI" || slotPosition === "CAD") return wingbackFormula;
+  if (slotPosition === "MCO") return attackingMidFormula;
+  if (slotPosition === "MCD") return defensiveMidFormula;
+  if (slotPosition === "MC") return centralMidFormula;
+  if (slotPosition === "MI" || slotPosition === "MD") return wideMidFormula;
+  if (slotPosition === "DC") return strikerFormula;
+  if (slotPosition === "SD") return secondStrikerFormula;
+  if (slotPosition === "EI" || slotPosition === "ED") return wideForwardFormula;
+
+  if (slotPosition === "DEF") {
+    if (position === "DFC") return defenderCenterFormula;
+    if (position === "LI" || position === "LD") return fullbackFormula;
+    if (position === "CAI" || position === "CAD") return wingbackFormula;
+    return defenderCenterFormula;
+  }
+  if (slotPosition === "MID") {
+    if (position === "MCO") return attackingMidFormula;
+    if (position === "MCD") return defensiveMidFormula;
+    if (position === "MC") return centralMidFormula;
+    if (position === "MI" || position === "MD") return wideMidFormula;
+    return centralMidFormula;
+  }
+  if (slotPosition === "FWD") {
+    if (position === "DC") return strikerFormula;
+    if (position === "SD") return secondStrikerFormula;
+    return wideForwardFormula;
+  }
+  return centralMidFormula;
+}
+
+const strikerFormula = (p: Player) => 0.10 * p.pace + 0.45 * p.shooting + 0.10 * p.passing + 0.20 * p.dribbling + 0.05 * p.defense + 0.10 * p.physical;
+const secondStrikerFormula = (p: Player) => 0.10 * p.pace + 0.35 * p.shooting + 0.20 * p.passing + 0.25 * p.dribbling + 0.05 * p.defense + 0.05 * p.physical;
+const wideForwardFormula = (p: Player) => 0.20 * p.pace + 0.15 * p.shooting + 0.25 * p.passing + 0.30 * p.dribbling + 0.05 * p.defense + 0.05 * p.physical;
+const attackingMidFormula = (p: Player) => 0.05 * p.pace + 0.20 * p.shooting + 0.35 * p.passing + 0.30 * p.dribbling + 0.05 * p.defense + 0.05 * p.physical;
+const centralMidFormula = (p: Player) => 0.05 * p.pace + 0.10 * p.shooting + 0.35 * p.passing + 0.20 * p.dribbling + 0.15 * p.defense + 0.15 * p.physical;
+const wideMidFormula = (p: Player) => 0.15 * p.pace + 0.10 * p.shooting + 0.30 * p.passing + 0.25 * p.dribbling + 0.10 * p.defense + 0.10 * p.physical;
+const defensiveMidFormula = (p: Player) => 0.05 * p.pace + 0.05 * p.shooting + 0.25 * p.passing + 0.10 * p.dribbling + 0.35 * p.defense + 0.20 * p.physical;
+const defenderCenterFormula = (p: Player) => 0.10 * p.pace + 0.00 * p.shooting + 0.10 * p.passing + 0.05 * p.dribbling + 0.50 * p.defense + 0.25 * p.physical;
+const fullbackFormula = (p: Player) => 0.15 * p.pace + 0.05 * p.shooting + 0.15 * p.passing + 0.10 * p.dribbling + 0.40 * p.defense + 0.15 * p.physical;
+const wingbackFormula = (p: Player) => 0.20 * p.pace + 0.05 * p.shooting + 0.20 * p.passing + 0.15 * p.dribbling + 0.25 * p.defense + 0.15 * p.physical;
 
 /**
  * Nivel ofensivo de un jugador para rematar: combinación de Tiro y Regate.
  * Pesa más el Tiro (70%) que el Regate (30%) para la calidad del remate.
  */
 function shooterRating(p: Player): number {
-  return (p.shooting * 0.7 + p.dribbling * 0.3) * outOfPositionFactor(p);
+  return (p.shooting * 0.7 + p.dribbling * 0.3) * positionRatingFactor(p);
 }
 
 /**
@@ -94,7 +151,7 @@ function shooterRating(p: Player): number {
  * Pesa más el Pase (75%) que la Velocidad (25%).
  */
 function creatorRating(p: Player): number {
-  return (p.passing * 0.75 + p.pace * 0.25) * outOfPositionFactor(p);
+  return (p.passing * 0.75 + p.pace * 0.25) * positionRatingFactor(p);
 }
 
 /**
@@ -102,7 +159,7 @@ function creatorRating(p: Player): number {
  * Pesa más la Defensa (70%) que el Físico (30%).
  */
 function defenderRating(p: Player): number {
-  return (p.defense * 0.7 + p.physical * 0.3) * outOfPositionFactor(p);
+  return (p.defense * 0.7 + p.physical * 0.3) * positionRatingFactor(p);
 }
 
 /**
@@ -119,8 +176,9 @@ function teamStrength(team: Team): { attack: number; defense: number; overall: n
 
   // Nivel de Ataque: FWD + MID en cancha — combinación de creación (Pase+Velocidad)
   // y remate (Tiro+Regate). Los creadores dan profundidad, los rematadores definen.
-  const atkLine = onField.filter((p) => p.fieldPosition === "FWD" || p.fieldPosition === "MID");
-  const defLine = onField.filter((p) => p.fieldPosition === "DEF" || p.fieldPosition === "GK");
+  // fieldPosition contiene el PositionGroup del slot (GK/DEF/MID/FWD).
+  const atkLine = onField.filter((p) => slotGroupForPosition(p.fieldPosition) === "FWD" || slotGroupForPosition(p.fieldPosition) === "MID");
+  const defLine = onField.filter((p) => slotGroupForPosition(p.fieldPosition) === "DEF" || slotGroupForPosition(p.fieldPosition) === "GK");
 
   const atk = atkLine.length > 0
     ? avg(atkLine.map((p) => {
@@ -136,7 +194,7 @@ function teamStrength(team: Team): { attack: number; defense: number; overall: n
     ? avg(defLine.map((p) => defenderRating(p) * staminaFactor(p)))
     : avg(onField.map((p) => defenderRating(p) * staminaFactor(p)));
 
-  const ov = avg(onField.map((p) => p.overall * staminaFactor(p) * outOfPositionFactor(p)));
+  const ov = avg(onField.map((p) => computePlayerPositionRating(p, p.fieldPosition) * staminaFactor(p)));
   // Penalización por hombres menos
   const numericPenalty = Math.max(0, 11 - onField.length) * 4;
   // Ajuste táctico: roles individuales + altura de línea (tabla configurable en tactics.ts).
@@ -160,18 +218,18 @@ export function previewStrength(team: Team): { attack: number; defense: number }
   const starters = team.starting
     .map((id, i) => {
       const p = team.squad.find((pp) => pp.id === id);
-      return p ? { ...p, fieldPosition: formSlots[i] as Position } : null;
+      return p ? { ...p, fieldPosition: formSlots[i] } : null;
     })
     .filter(Boolean) as Player[];
   if (starters.length === 0) return { attack: 50, defense: 50 };
-  const atkLine = starters.filter((p) => p.fieldPosition === "FWD" || p.fieldPosition === "MID");
-  const defLine = starters.filter((p) => p.fieldPosition === "DEF" || p.fieldPosition === "GK");
+  const atkLine = starters.filter((p) => slotGroupForPosition(p.fieldPosition) === "FWD" || slotGroupForPosition(p.fieldPosition) === "MID");
+  const defLine = starters.filter((p) => slotGroupForPosition(p.fieldPosition) === "DEF" || slotGroupForPosition(p.fieldPosition) === "GK");
   const baseAtk = atkLine.length > 0
-    ? avg(atkLine.map((p) => (creatorRating(p) * 0.4 + shooterRating(p) * 0.6) * outOfPositionFactor(p)))
-    : avg(starters.map((p) => (creatorRating(p) * 0.4 + shooterRating(p) * 0.6) * outOfPositionFactor(p)));
+    ? avg(atkLine.map((p) => (creatorRating(p) * 0.4 + shooterRating(p) * 0.6) * positionRatingFactor(p)))
+    : avg(starters.map((p) => (creatorRating(p) * 0.4 + shooterRating(p) * 0.6) * positionRatingFactor(p)));
   const baseDef = defLine.length > 0
-    ? avg(defLine.map((p) => defenderRating(p) * outOfPositionFactor(p)))
-    : avg(starters.map((p) => defenderRating(p) * outOfPositionFactor(p)));
+    ? avg(defLine.map((p) => defenderRating(p) * positionRatingFactor(p)))
+    : avg(starters.map((p) => defenderRating(p) * positionRatingFactor(p)));
   const tac = teamTacticalAdjustment(team, starters);
   return {
     attack: Math.round(baseAtk + tac.attack),
@@ -305,7 +363,7 @@ export function tickMinute(state: MatchState): MatchEvent[] {
     // Falta / amarilla
     const teamIdx = rand() < 0.5 ? 0 : 1;
     const team = state.teams[teamIdx];
-    const fouler = pick(team.squad.filter((p) => p.onField && !p.redCarded && p.position !== "GK"));
+      const fouler = pick(team.squad.filter((p) => p.onField && !p.redCarded && p.position !== "POR"));
     if (fouler) {
       newEvents.push(C.foulEv(state.minute, fouler.name));
       team.fouls += 1;
@@ -517,13 +575,13 @@ function handleAttack(state: MatchState, attacker: Team, defender: Team, atkIdx:
   const candidates = attacker.squad.filter((p) => p.onField && !p.redCarded);
   const shooter = weightedPick(
     candidates,
-    (p) => scorerWeight(p.fieldPosition) * (0.5 + shooterRating(p) / 100),
+    (p) => scorerWeight(slotGroupForPosition(p.fieldPosition)) * (0.5 + shooterRating(p) / 100),
   );
   if (!shooter) return;
 
   // El atacante progresa con creadores (Pase+Velocidad) antes de rematar.
   // Tomamos el promedio de creatorRating del equipo atacante como bonus de ocasión.
-  const atkCreators = candidates.filter((p) => p.fieldPosition === "MID" || p.fieldPosition === "FWD");
+  const atkCreators = candidates.filter((p) => slotGroupForPosition(p.fieldPosition) === "MID" || slotGroupForPosition(p.fieldPosition) === "FWD");
   const creationBonus = atkCreators.length > 0
     ? avg(atkCreators.map((p) => creatorRating(p)))
     : avg(candidates.map((p) => creatorRating(p)));
@@ -550,8 +608,8 @@ function handleAttack(state: MatchState, attacker: Team, defender: Team, atkIdx:
 
   // Arquero defensor: su efectividad depende del out-of-position factor.
   // La capacidad de atajada del arquero usa su Defensa (atributo principal para GK).
-  const gk = defender.squad.find((p) => p.onField && !p.redCarded && p.fieldPosition === "GK");
-  const gkFactor = gk ? outOfPositionFactor(gk) : 0.65;
+  const gk = defender.squad.find((p) => p.onField && !p.redCarded && slotGroupForPosition(p.fieldPosition) === "GK");
+  const gkFactor = gk ? positionRatingFactor(gk) : 0.65;
   // Un arquero fuera de posición encaja más goles.
   const adjustedGoalProb = Math.min(0.75, goalProb + (1 - gkFactor) * 0.25);
 
@@ -617,7 +675,7 @@ export function possessionPct(state: MatchState): [number, number] {
 export function teamRating(team: Team): number {
   const onField = team.squad.filter((p) => team.starting.includes(p.id));
   if (!onField.length) return 0;
-  return Math.round(avg(onField.map((p) => p.overall)));
+  return Math.round(avg(onField.map((p) => computePlayerPositionRating(p, p.fieldPosition))));
 }
 
 /**
@@ -628,7 +686,6 @@ export function teamRating(team: Team): number {
  * - Tiros sin gol: -0.1 c/u (máx -0.5)
  * - Tarjeta amarilla: -0.3
    * - Roja: -1.0
- * - Penalización por fuera de posición: hasta -1.5 según factor
  */
 export function computePlayerRating(
   player: Player,
@@ -641,9 +698,6 @@ export function computePlayerRating(
   r -= Math.min(0.5, Math.max(0, stats.shots - stats.goals) * 0.1);
   r -= stats.yellowCards * 0.3;
   if (stats.redCarded) r -= 1.0;
-  // Penalización por fuera de posición
-  const factor = outOfPositionFactor(player);
-  if (factor < 1) r -= (1 - factor) * 2.5;
   return Math.max(1, Math.min(10, Math.round(r * 10) / 10));
 }
 

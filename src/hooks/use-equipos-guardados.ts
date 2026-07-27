@@ -23,7 +23,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 import type { Player } from "@/lib/football/types";
-import { migrateSquadIfNeeded } from "@/lib/football/migration";
+import { migrateSquadFull } from "@/lib/football/migration";
 
 export interface EquipoGuardado {
   id: string;
@@ -68,10 +68,10 @@ export function useEquiposGuardados() {
       return;
     }
 
-    // Migrar planteles con estructura vieja (4 atributos) → nueva (6 atributos)
+    // Migrar planteles viejos: 4 atributos → 6 atributos Y posiciones genéricas → 15 específicas
     const equiposMigrados = (data ?? []).map((e) => ({
       ...e,
-      plantel: migrateSquadIfNeeded(e.plantel as Player[]),
+      plantel: migrateSquadFull(e.plantel as Player[]),
     }));
 
     setState({ equipos: equiposMigrados as EquipoGuardado[], loading: false, error: null });

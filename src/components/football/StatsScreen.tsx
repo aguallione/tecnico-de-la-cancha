@@ -1,5 +1,7 @@
 import { useGame } from "@/lib/football/store";
-import { outOfPositionFactor, computePlayerRating, computeTeamRating } from "@/lib/football/engine";
+import { computePlayerPositionRating, computePlayerRating, computeTeamRating } from "@/lib/football/engine";
+import { POSITION_GROUP } from "@/lib/football/types";
+import { slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import type { Team, PlayerMatchStats } from "@/lib/football/types";
 
 export function StatsScreen() {
@@ -183,11 +185,11 @@ function TeamCol({ team, align }: { team: Team; align: "left" | "right" }) {
 }
 
 function GKCard({ team, shotsOnTargetReceived }: { team: Team; shotsOnTargetReceived: number }) {
-  const gk = team.squad.find((p) => p.fieldPosition === "GK" && team.starting.includes(p.id));
+  // fieldPosition contiene el PositionGroup del slot
+  const gk = team.squad.find((p) => slotGroupForPosition(p.fieldPosition) === "GK" && team.starting.includes(p.id));
   if (!gk) return null;
-  const factor = outOfPositionFactor(gk);
-  const effective = Math.round(gk.overall * factor);
-  const oop = factor < 1;
+  const effective = computePlayerPositionRating(gk, "GK");
+  const oop = POSITION_GROUP[gk.position] !== "GK";
   // saves + goals_received = shotsOnTargetReceived (invariante garantizada por el engine)
   return (
     <div className="card p-4">
@@ -196,14 +198,14 @@ function GKCard({ team, shotsOnTargetReceived }: { team: Team; shotsOnTargetRece
         <div>
           <div className="font-display font-bold">{gk.name}</div>
           <div className="text-xs text-muted-foreground">
-            {gk.position === "GK" ? "Arquero natural" : `Juega de ${gk.position} · FUERA DE POSICIÓN`}
+            {gk.position === "POR" ? "Arquero natural" : `Juega de ${gk.position} · FUERA DE POSICIÓN`}
           </div>
         </div>
         <div className="text-right">
-          <div className="text-xs text-muted-foreground">Puntaje base → efectivo</div>
+          <div className="text-xs text-muted-foreground">Puntaje efectivo</div>
           <div className="font-display font-black text-lg">
-            {gk.overall}
-            {oop && <span className="text-red-500"> → {effective}</span>}
+            {effective}
+            {oop && <span className="text-red-500"> ({gk.overall})</span>}
           </div>
         </div>
       </div>
@@ -219,7 +221,7 @@ function GKCard({ team, shotsOnTargetReceived }: { team: Team; shotsOnTargetRece
       </div>
       {oop && (
         <div className="mt-2 text-xs text-red-400">
-          Penalización aplicada: -{Math.round((1 - factor) * 100)}% por jugar fuera de posición
+          Valoración calculada desde la posición actual.
         </div>
       )}
     </div>
@@ -241,9 +243,7 @@ function PlayerRatings({ team, stats }: { team: Team; stats: Record<string, Play
         {starters.map((p) => {
           const ps = stats[p.id];
           const rating = computePlayerRating(p, ps);
-          // Use the field position that was actually assigned in the locker screen / initMatch.
-          const factor = outOfPositionFactor(p);
-          const oop = factor < 1;
+          const oop = p.fieldPosition ? POSITION_GROUP[p.position] !== slotGroupForPosition(p.fieldPosition) : false;
           return (
             <div key={p.id} className="flex items-center gap-2 text-sm">
               <span className="flex-1 truncate">

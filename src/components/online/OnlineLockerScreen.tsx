@@ -15,9 +15,9 @@
  */
 
 import { useMemo, useRef, useState } from "react";
-import { FORMATION_LIST, slotsFor } from "@/lib/football/formations";
+import { FORMATION_LIST, slotsFor, rowsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import { autoLineup } from "@/lib/football/bot";
-import { initMatch, outOfPositionFactor } from "@/lib/football/engine";
+import { initMatch, computePlayerPositionRating } from "@/lib/football/engine";
 import {
   LINE_HEIGHT_TABLE,
   BUILDUP_TABLE,
@@ -34,17 +34,25 @@ import type {
   MatchSettings,
   Player,
   Position,
+  PositionGroup,
   PressIntensity,
   Style,
   Team,
 } from "@/lib/football/types";
+import { POSITION_GROUP } from "@/lib/football/types";
+import type { JugadorOnline, ModoCoop } from "@/lib/online/types";
 import { useOnlineGame } from "@/lib/online/store";
-import { estaConectado, type JugadorOnline, type ModoCoop } from "@/lib/online/types";
-import { guardarEquipo, guardarMatchState, marcarEquipoListo } from "@/lib/online/api";
-import { TransferirAdminModal } from "@/components/online/TransferirAdminModal";
+import { guardarEquipo, marcarEquipoListo, guardarMatchState } from "@/lib/online/api";
 import { OnlineHeader } from "@/components/online/OnlineHeader";
+import { TransferirAdminModal } from "@/components/online/TransferirAdminModal";
 
-const POSITION_SHORT: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
+const POSITION_SHORT: Record<Position, string> = {
+  POR: "POR",
+  DFC: "DFC", LI: "LI", LD: "LD", CAI: "CAI", CAD: "CAD",
+  MCD: "MCD", MC: "MC", MI: "MI", MD: "MD", MCO: "MCO",
+  DC: "DC", SD: "SD", EI: "EI", ED: "ED",
+};
+const GROUP_SHORT: Record<PositionGroup, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
 
 const DEFAULT_SETTINGS: MatchSettings = {
   injuriesEnabled: true,
@@ -133,6 +141,7 @@ function LockerInner({
   const canEdit = modo !== "roles" || esRolAlineacion;
 
   const slots = useMemo(() => slotsFor(team.formation), [team.formation]);
+  const rows = useMemo(() => rowsFor(team.formation), [team.formation]);
 
   function changeFormation(f: FormationName) {
     team.formation = f;
@@ -199,6 +208,7 @@ function LockerInner({
     equipoListo(jugadores, 1, partida!.modo_coop_1, !!partida!.equipo_1);
 
   const starters = team.squad.filter((p) => team.starting.includes(p.id));
+  const seeOwnRatings = partida!.configuracion?.seeOwnRatings ?? true;
 
   return (
     <div className="min-h-screen bg-background text-foreground pb-28">
@@ -332,36 +342,43 @@ function LockerInner({
           </div>
 
           {/* Cancha */}
-          <div className="mt-5 rounded-2xl bg-pitch relative overflow-hidden" style={{ minHeight: 380 }}>
-            <div className="relative z-10 grid grid-rows-4 h-[380px] p-3 gap-1">
-              {(["FWD", "MID", "DEF", "GK"] as Position[]).map((rowPos) => {
-                const indexes = slots.map((s, i) => (s === rowPos ? i : -1)).filter((i) => i >= 0);
-                if (indexes.length === 0) return null;
+          <div className="mt-5 rounded-2xl bg-pitch relative overflow-hidden" style={{ minHeight: rows.length >= 5 ? 440 : 380 }}>
+            <div className="relative z-10 grid p-3 gap-1" style={{ gridTemplateRows: `repeat(${rows.length}, 1fr)`, height: rows.length >= 5 ? 440 : 380 }}>
+              {[...rows.keys()].reverse().map((rowIdx) => {
+                const row = rows[rowIdx];
+                const offset = rows.slice(0, rowIdx).reduce((s, r) => s + r.length, 0);
                 return (
-                  <div key={rowPos} className="flex items-center justify-around gap-2">
-                    {indexes.map((i) => {
+                  <div key={rowIdx} className="flex items-center justify-around gap-2">
+                    {row.map((slotPosition, j) => {
+                      const i = offset + j;
                       const id = team.starting[i];
                       const p = team.squad.find((pp) => pp.id === id);
-                      const slotPos = slots[i];
-                      const factor = p ? outOfPositionFactor({ ...p, fieldPosition: slotPos }) : 1;
-                      const oop = p && factor < 1;
+                      const effective = p ? computePlayerPositionRating(p, slotPosition) : 0;
+                      const oop = p ? POSITION_GROUP[p.position] !== slotGroupForPosition(slotPosition) : false;
                       return (
                         <label key={i} className="flex flex-col items-center text-center max-w-[9rem] flex-1">
                           <span className="text-[10px] uppercase tracking-wider text-lime-200/80">
-                            {POSITION_SHORT[slotPos]}
+                            {POSITION_SHORT[slotPosition]}
                           </span>
                           <select
                             value={id ?? ""}
                             onChange={(e) => swapSlot(i, e.target.value)}
                             className="mt-1 w-full appearance-none rounded-lg bg-white/95 text-foreground text-xs font-medium px-2 py-1.5 shadow-md focus:outline-none focus:ring-2 focus:ring-primary"
                           >
-                            {team.squad.map((sp) => (
-                              <option key={sp.id} value={sp.id}>
-                                {sp.name} ({sp.overall} {POSITION_SHORT[sp.position]})
-                              </option>
-                            ))}
+                            {team.squad.map((sp) => {
+                              const effectiveOption = computePlayerPositionRating(sp, slotPosition);
+                              return (
+                                <option key={sp.id} value={sp.id}>
+                                  {seeOwnRatings
+                                    ? `${sp.name} (${effectiveOption} ${POSITION_SHORT[sp.position]})`
+                                    : `${sp.name} (${POSITION_SHORT[sp.position]})`}
+                                </option>
+                              );
+                            })}
                           </select>
-                          {oop && <span className="text-[10px] font-bold text-red-400 mt-0.5">Fuera de pos.</span>}
+                          <div className="text-[10px] text-lime-100/70 mt-0.5">
+                            {oop ? <span className="text-red-400">{p?.overall ?? 0} → {effective}</span> : <span>{effective}</span>}
+                          </div>
                         </label>
                       );
                     })}
@@ -433,8 +450,6 @@ function LockerInner({
   );
 }
 
-const POSITION_SHORT_ROLES: Record<Position, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
-
 function RoleEffectBadge({ role }: { role: string | undefined }) {
   const eff = roleEffect(role);
   if (!role || (eff.attack === 0 && eff.defense === 0)) {
@@ -467,9 +482,9 @@ function IndividualRoles({
   const starters = team.starting
     .map((id, i) => {
       const p = team.squad.find((pp) => pp.id === id);
-      return p ? { p, fieldPos: slots[i] } : null;
+      return p ? { p, fieldGroup: slotGroupForPosition(slots[i]) ?? "GK" } : null;
     })
-    .filter(Boolean) as Array<{ p: Player; fieldPos: Position }>;
+    .filter(Boolean) as Array<{ p: Player; fieldGroup: PositionGroup }>;
 
   return (
     <div className="mt-6">
@@ -478,8 +493,8 @@ function IndividualRoles({
         Ajustan levemente el aporte de cada jugador al Nivel de Ataque o Defensa del equipo.
       </p>
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
-        {starters.map(({ p, fieldPos }) => {
-          const roles = rolesForPosition(fieldPos);
+        {starters.map(({ p, fieldGroup }) => {
+          const roles = rolesForPosition(fieldGroup);
           const groups = Array.from(new Set(roles.map((r) => ROLE_TABLE[r].group ?? "")));
           const currentRole = roles.includes(p.individualRole || "") ? p.individualRole : "";
           return (
@@ -487,7 +502,7 @@ function IndividualRoles({
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">
                   {p.name}{" "}
-                  <span className="text-xs text-muted-foreground">({POSITION_SHORT_ROLES[fieldPos]})</span>
+                  <span className="text-xs text-muted-foreground">({POSITION_SHORT[p.position]})</span>
                 </div>
                 {roles.length > 0 ? (
                   <select
