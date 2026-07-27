@@ -29,6 +29,22 @@ export interface MatchState {
 function rand(): number { return Math.random(); }
 function pick<T>(a: T[]): T { return a[Math.floor(Math.random() * a.length)]; }
 
+const LANE_BY_POSITION: Record<Position, "izquierda" | "centro" | "derecha"> = {
+  POR: "centro",
+  DFC: "centro", LI: "izquierda", LD: "derecha", CAI: "izquierda", CAD: "derecha",
+  MCD: "centro", MC: "centro", MI: "izquierda", MD: "derecha", MCO: "centro",
+  DC: "centro", SD: "centro", EI: "izquierda", ED: "derecha",
+};
+
+function depthForGroup(group: PositionGroup | undefined): "area_propia" | "tercio_propio" | "medio" | "tercio_rival" | "area_rival" {
+  switch (group) {
+    case "GK": return "area_propia";
+    case "DEF": return "tercio_propio";
+    case "FWD": return "tercio_rival";
+    default: return "medio";
+  }
+}
+
 /**
  * Peso relativo de probabilidad de que un jugador remate/convierta un gol,
  * según su grupo lógico EN CANCHA (no la natural). Refleja el fútbol real:
@@ -365,34 +381,45 @@ export function tickMinute(state: MatchState): MatchEvent[] {
     const team = state.teams[teamIdx];
       const fouler = pick(team.squad.filter((p) => p.onField && !p.redCarded && p.position !== "POR"));
     if (fouler) {
-      newEvents.push(C.foulEv(state.minute, fouler.name));
+      const foulZone = { team: teamIdx as 0 | 1, depth: "medio" as const, lane: LANE_BY_POSITION[fouler.position] };
+      const foulEvent = C.foulEv(state.minute, fouler.name);
+      foulEvent.zone = foulZone;
+      newEvents.push(foulEvent);
       team.fouls += 1;
       const fStats = state.playerStats[fouler.id];
       if (rand() < 0.18) {
         fouler.yellowCards += 1;
         team.yellowCards += 1;
         if (fStats) fStats.yellowCards += 1;
-        newEvents.push(C.yellow(state.minute, fouler.name));
+        const yellowEvent = C.yellow(state.minute, fouler.name);
+        yellowEvent.zone = foulZone;
+        newEvents.push(yellowEvent);
         if (fouler.yellowCards >= 2) {
           fouler.redCarded = true;
           fouler.onField = false;
           team.redCards += 1;
           if (fStats) fStats.redCarded = true;
-          newEvents.push(C.red(state.minute, fouler.name, team.config.name));
+          const redEvent = C.red(state.minute, fouler.name, team.config.name);
+          redEvent.zone = foulZone;
+          newEvents.push(redEvent);
         }
       } else if (rand() < 0.02) {
         fouler.redCarded = true;
         fouler.onField = false;
         team.redCards += 1;
         if (fStats) fStats.redCarded = true;
-        newEvents.push(C.red(state.minute, fouler.name, team.config.name));
+        const redEvent = C.red(state.minute, fouler.name, team.config.name);
+        redEvent.zone = foulZone;
+        newEvents.push(redEvent);
       }
     }
   } else if (eventRoll < 0.24) {
     // Córner
     const teamIdx = rand() < 0.5 ? 0 : 1;
     state.teams[teamIdx].corners += 1;
-    newEvents.push(C.cornerEv(state.minute, state.teams[teamIdx].config.name));
+    const cornerEvent = C.cornerEv(state.minute, state.teams[teamIdx].config.name);
+    cornerEvent.zone = { team: teamIdx as 0 | 1, depth: "area_rival", lane: rand() < 0.5 ? "izquierda" : "derecha" };
+    newEvents.push(cornerEvent);
   } else if (state.settings.injuriesEnabled && eventRoll < 0.245) {
     // Lesión rara
     const teamIdx = rand() < 0.5 ? 0 : 1;
@@ -400,7 +427,9 @@ export function tickMinute(state: MatchState): MatchEvent[] {
     const victim = pick(team.squad.filter((p) => p.onField && !p.redCarded && !p.injured));
     if (victim) {
       victim.injured = true;
-      newEvents.push(C.injuryEv(state.minute, victim.name));
+      const injuryEvent = C.injuryEv(state.minute, victim.name);
+      injuryEvent.zone = { team: teamIdx as 0 | 1, depth: depthForGroup(POSITION_GROUP[victim.position]), lane: LANE_BY_POSITION[victim.position] };
+      newEvents.push(injuryEvent);
     }
   } else if (state.minute % 7 === 0) {
     newEvents.push(C.tickComment(state.minute));
@@ -619,12 +648,16 @@ function handleAttack(state: MatchState, attacker: Team, defender: Team, atkIdx:
   // Invariante garantizada: para cada equipo,
   //   shotsOnTarget(rival) === saves(equipo) + goles_recibidos(equipo)
   // porque cada tiro al arco del rival termina en gol o en atajada de este arquero.
+  const shotZone = { team: atkIdx, depth: "area_rival" as const, lane: LANE_BY_POSITION[shooter.position] };
+
   if (roll < adjustedGoalProb) {
     // Gol: cuenta como tiro al arco del atacante y gol del atacante.
     attacker.shotsOnTarget += 1;
     attacker.goals += 1;
     if (shooterStats) shooterStats.goals += 1;
-    out.push(C.goal(state.minute, shooter.name, atkIdx, attacker.config.name));
+    const ev = C.goal(state.minute, shooter.name, atkIdx, attacker.config.name);
+    ev.zone = shotZone;
+    out.push(ev);
   } else if (roll < adjustedGoalProb + onTargetProb * 0.5) {
     // Tiro al arco. Con arquero en cancha → atajada; sin arquero (expulsado) → gol,
     // para que la invariante shotsOnTarget = saves + goles_recibidos nunca se rompa.
@@ -633,15 +666,21 @@ function handleAttack(state: MatchState, attacker: Team, defender: Team, atkIdx:
       defender.saves += 1;
       const gkStats = state.playerStats[gk.id];
       if (gkStats) gkStats.saves += 1;
-      out.push(C.chance(state.minute, shooter.name, attacker.config.name));
+      const ev = C.chance(state.minute, shooter.name, attacker.config.name);
+      ev.zone = shotZone;
+      out.push(ev);
     } else {
       attacker.goals += 1;
       if (shooterStats) shooterStats.goals += 1;
-      out.push(C.goal(state.minute, shooter.name, atkIdx, attacker.config.name));
+      const ev = C.goal(state.minute, shooter.name, atkIdx, attacker.config.name);
+      ev.zone = shotZone;
+      out.push(ev);
     }
   } else {
     // Tiro desviado: solo cuenta como tiro total, no al arco.
-    out.push(C.chance(state.minute, shooter.name, attacker.config.name));
+    const ev = C.chance(state.minute, shooter.name, attacker.config.name);
+    ev.zone = shotZone;
+    out.push(ev);
   }
 }
 

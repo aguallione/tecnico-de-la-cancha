@@ -110,11 +110,23 @@ export interface MatchStats {
   players: Record<string, PlayerMatchStats>;
 }
 
+export type ZoneDepth = "area_propia" | "tercio_propio" | "medio" | "tercio_rival" | "area_rival";
+export type ZoneLane = "izquierda" | "centro" | "derecha";
+
+/** Zona de la cancha donde ocurrió la jugada, relativa al equipo `team` (si ataca hacia el área rival). */
+export interface MatchZone {
+  team: 0 | 1;
+  depth: ZoneDepth;
+  lane: ZoneLane;
+}
+
 export interface MatchEvent {
   minute: number;
   text: string;
   kind: "info" | "goal" | "chance" | "card" | "sub" | "foul" | "corner" | "kickoff" | "final" | "insight";
   team?: 0 | 1;
+  /** Ausente = la pelota no se mueve de donde estaba (comentarios, sugerencias, cambios, etc.) */
+  zone?: MatchZone;
 }
 
 /** Automatizaciones tácticas configurables por el usuario. Todas off por defecto. */
