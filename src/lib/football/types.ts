@@ -23,7 +23,8 @@ export const POSITION_GROUP: Record<Position, PositionGroup> = {
   DC: "FWD", SD: "FWD", EI: "FWD", ED: "FWD",
 };
 export type Style = "Ofensivo" | "Equilibrado" | "Defensivo";
-export type FormationName = "4-4-2" | "4-3-3" | "3-5-2" | "4-2-3-1" | "5-3-2" | "3-4-3";
+/** Nombre de formación: una de las 6 predefinidas, o el id de una formación personalizada del usuario. */
+export type FormationName = string;
 // Parámetros tácticos avanzados (ver src/lib/football/tactics.ts para sus efectos)
 export type LineHeight = "Baja" | "Media" | "Alta";
 export type BuildUp = "Lento" | "Equilibrado" | "Rápido";

@@ -1,6 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useGame } from "@/lib/football/store";
-import { FORMATION_LIST, slotsFor, rowsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
+import { FORMATION_LIST, slotsFor, rowsFor, registerCustomFormation, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
+import { useFormacionesPersonalizadas } from "@/hooks/use-formaciones-personalizadas";
+import { FormationEditorModal } from "@/components/football/FormationEditorModal";
 import { autoLineup } from "@/lib/football/bot";
 import { computePlayerPositionRating } from "@/lib/football/engine";
 import {
@@ -50,7 +52,13 @@ export function LockerScreen() {
   const [, forceTick] = useState(0);
   const rerender = () => forceTick((n) => n + 1);
   const [error, setError] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const { formaciones: formacionesPersonalizadas, guardar: guardarFormacion } = useFormacionesPersonalizadas();
 
+  // Registrar las formaciones personalizadas del usuario para que slotsFor/rowsFor las reconozcan por id.
+  useEffect(() => {
+    for (const f of formacionesPersonalizadas) registerCustomFormation(f.id, f.filas);
+  }, [formacionesPersonalizadas]);
   const slots = useMemo(() => slotsFor(team.formation), [team.formation]);
   const rows = useMemo(() => rowsFor(team.formation), [team.formation]);
 
@@ -142,8 +150,18 @@ export function LockerScreen() {
               <div className="label">Formación</div>
               <select className="input mt-1 w-full" value={team.formation}
                 onChange={(e) => changeFormation(e.target.value as FormationName)}>
-                {FORMATION_LIST.map((f) => <option key={f}>{f}</option>)}
+                <optgroup label="Predefinidas">
+                  {FORMATION_LIST.map((f) => <option key={f} value={f}>{f}</option>)}
+                </optgroup>
+                {formacionesPersonalizadas.length > 0 && (
+                  <optgroup label="Mis formaciones">
+                    {formacionesPersonalizadas.map((f) => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+                  </optgroup>
+                )}
               </select>
+              <button type="button" onClick={() => setEditorOpen(true)} className="btn-ghost text-xs mt-1 py-1 px-2">
+                + Crear formación
+              </button>
             </div>
             <div>
               <div className="label">Estilo de juego</div>
@@ -289,6 +307,21 @@ export function LockerScreen() {
 
         {error && <div className="mt-4 text-sm text-destructive-foreground bg-destructive rounded-md px-3 py-2">{error}</div>}
       </div>
+
+      {editorOpen && (
+        <FormationEditorModal
+          guardar={guardarFormacion}
+          onClose={() => setEditorOpen(false)}
+          onSaved={(nombre: string, filasGuardadas: Position[][]) => {
+            // El id real lo asigna Supabase y llega en el próximo refresh del hook;
+            // mientras tanto, usamos temporalmente el nombre como id para poder
+            // seleccionarla ya mismo sin esperar la vuelta del servidor.
+            registerCustomFormation(nombre, filasGuardadas);
+            changeFormation(nombre);
+            setEditorOpen(false);
+          }}
+        />
+      )}
 
       <div className="fixed bottom-0 inset-x-0 border-t bg-background/95 backdrop-blur px-4 py-3">
         <div className="max-w-4xl mx-auto flex gap-3">

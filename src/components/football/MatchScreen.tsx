@@ -4,6 +4,7 @@ import { initMatch, substitute, tickMinute, possessionPct, computePlayerPosition
 import { autoLineup } from "@/lib/football/bot";
 import { FORMATION_LIST, slotsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
+import { PitchMap2D } from "@/components/football/PitchMap2D";
 import type { BuildUp, FormationName, LineHeight, Player, Position, PositionGroup, PressIntensity, Style, Team } from "@/lib/football/types";
 import { POSITION_GROUP } from "@/lib/football/types";
 
@@ -105,6 +106,11 @@ export function MatchScreen() {
           <button className="chip" onClick={() => setSpeed(2)} data-active={speed === 2}>2x</button>
           <button className="chip" onClick={() => setSpeed(4)} data-active={speed === 4}>4x</button>
         </div>
+      </div>
+
+      {/* Mapa 2D */}
+      <div className="max-w-3xl mx-auto px-4 mt-4">
+        <PitchMap2D state={state} stepDurationMs={TICK_MS / speed} />
       </div>
 
       {/* Relato */}

@@ -432,7 +432,13 @@ export function tickMinute(state: MatchState): MatchEvent[] {
       newEvents.push(injuryEvent);
     }
   } else if (state.minute % 7 === 0) {
-    newEvents.push(C.tickComment(state.minute));
+    const commentEvent = C.tickComment(state.minute);
+    commentEvent.zone = {
+      team: (rand() < 0.5 ? 0 : 1) as 0 | 1,
+      depth: "medio",
+      lane: (["izquierda", "centro", "derecha"] as const)[Math.floor(rand() * 3)],
+    };
+    newEvents.push(commentEvent);
   }
 
   // ─── Automatizaciones tácticas ──────────────────────────────────────────────
