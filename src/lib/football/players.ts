@@ -34,7 +34,7 @@ function attributesFor(pos: Position, base: number) {
   const group: PositionGroup = POSITION_GROUP[pos];
   switch (group) {
     case "GK":
-      defense += 12; shooting -= 25; pace -= 8; passing -= 6; dribbling -= 18; physical += 4;
+      defense -= 5; shooting -= 30; pace -= 12; passing -= 10; dribbling -= 22; physical += 2;
       break;
     case "DEF":
       defense += 10; shooting -= 10; dribbling -= 6; passing -= 2;
