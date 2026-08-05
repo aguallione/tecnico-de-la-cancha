@@ -12,7 +12,13 @@ export type Screen =
   | "confirm"
   | "match"
   | "stats"
-  | "test";
+  | "test"
+  | "tournament_setup"
+  | "tournament_hub"
+  | "tournament_standings"
+  | "tournament_bracket"
+  | "tournament_match_summary"
+  | "tournament_final";
 
 export function makeTeam(config: TeamConfig): Team {
   const squad = generateSquad(20);
@@ -79,6 +85,9 @@ interface GameCtx {
   setScreen: (s: Screen) => void;
   teams: [Team | null, Team | null];
   setTeams: (t: [Team | null, Team | null]) => void;
+  /** Id del torneo activo, mientras se navega entre las pantallas de tournament_*. */
+  tournamentId: string | null;
+  setTournamentId: (id: string | null) => void;
   settings: MatchSettings;
   setSettings: (s: MatchSettings) => void;
   activeLockerTeam: 0 | 1;
@@ -100,6 +109,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [activeLockerTeam, setActiveLockerTeam] = useState<0 | 1>(0);
   const [testMode, setTestMode] = useState(false);
   const [lastMatchStats, setLastMatchStats] = useState<Record<string, PlayerMatchStats>>({});
+  const [tournamentId, setTournamentId] = useState<string | null>(null);
 
   const value = useMemo<GameCtx>(() => ({
     screen, setScreen,
@@ -108,14 +118,16 @@ export function GameProvider({ children }: { children: ReactNode }) {
     activeLockerTeam, setActiveLockerTeam,
     testMode, setTestMode,
     lastMatchStats, setLastMatchStats,
+    tournamentId, setTournamentId,
     reset: () => {
       setTeams([null, null]);
       setActiveLockerTeam(0);
       setTestMode(false);
       setLastMatchStats({});
+      setTournamentId(null);
       setScreen("home");
     },
-  }), [screen, teams, settings, activeLockerTeam, testMode, lastMatchStats]);
+  }), [screen, teams, settings, activeLockerTeam, testMode, lastMatchStats, tournamentId]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
