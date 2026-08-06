@@ -34,6 +34,12 @@ export function HomeScreen() {
           >
             Nueva partida vs Amigo (mismo dispositivo)
           </button>
+          <button
+            onClick={() => setScreen("tournament_setup")}
+            className="btn-secondary"
+          >
+            Nuevo torneo (Liga / Copa)
+          </button>
 
           {/* Separador online */}
           <div className="flex items-center gap-3 my-1">
