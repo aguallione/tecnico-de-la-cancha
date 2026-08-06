@@ -23,6 +23,7 @@ import {
   totalRondasLiga,
   totalRondasBracket,
 } from "./tournament-fixture";
+import { computeStandings } from "./tournament-standings";
 
 // ─── Filas crudas de Supabase (snake_case, tal cual las columnas) ───────────
 
@@ -397,4 +398,36 @@ export async function avanzarRondaSiCorresponde(torneoId: string): Promise<void>
     .update({ ronda_actual: nuevaRonda })
     .eq("id", torneoId);
   if (updateError) throw new Error(updateError.message);
+}
+
+/**
+ * Solo aplica a formatos de Liga (simple o ida y vuelta). Revisa si todos
+ * los partidos del fixture ya están resueltos; si es así, declara campeón
+ * al primero de la tabla de posiciones (mismo criterio de desempate que
+ * computeStandings: puntos, luego diferencia de gol, luego goles a favor)
+ * y cierra el torneo. Idempotente por el mismo motivo que
+ * avanzarRondaSiCorresponde: no hace nada si ya estaba finalizado.
+ */
+export async function finalizarLigaSiCorresponde(torneoId: string): Promise<void> {
+  const torneo = await fetchTorneo(torneoId);
+  if (torneo.format === "eliminacion_directa" || torneo.status === "finalizado") return;
+
+  const fixture = await fetchFixture(torneoId);
+  if (fixture.length === 0) return;
+  const todosResueltos = fixture.every((m) => m.status === "jugado" || m.status === "walkover");
+  if (!todosResueltos) return;
+
+  const slots = await fetchSlots(torneoId);
+  const standings = computeStandings(slots, fixture);
+  const campeonId = standings[0]?.slotId ?? null;
+
+  const { error } = await supabase
+    .from("torneos")
+    .update({
+      estado: "finalizado",
+      campeon_slot_id: campeonId,
+      finalizado_en: new Date().toISOString(),
+    })
+    .eq("id", torneoId);
+  if (error) throw new Error(error.message);
 }

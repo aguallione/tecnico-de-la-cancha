@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useGame } from "@/lib/football/store";
 import { computePlayerPositionRating, computePlayerRating, computeTeamRating } from "@/lib/football/engine";
-import { avanzarRondaSiCorresponde } from "@/lib/football/tournament-api";
+import { avanzarRondaSiCorresponde, finalizarLigaSiCorresponde } from "@/lib/football/tournament-api";
 import { POSITION_GROUP } from "@/lib/football/types";
 import { slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import type { Team, PlayerMatchStats } from "@/lib/football/types";
@@ -25,6 +25,9 @@ export function StatsScreen() {
     avanceRondaEnviadoRef.current = true;
     avanzarRondaSiCorresponde(tournamentId).catch((err) => {
       console.error("No se pudo avanzar de ronda en el torneo:", err);
+    });
+    finalizarLigaSiCorresponde(tournamentId).catch((err) => {
+      console.error("No se pudo verificar el fin de la liga:", err);
     });
   }, [tournamentId, tournamentActiveMatchId]);
 

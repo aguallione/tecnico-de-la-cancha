@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useGame } from "@/lib/football/store";
-import { fetchTorneo, fetchSlots, fetchFixture, teamFromSlot, avanzarRondaSiCorresponde } from "@/lib/football/tournament-api";
+import { fetchTorneo, fetchSlots, fetchFixture, teamFromSlot, avanzarRondaSiCorresponde, finalizarLigaSiCorresponde } from "@/lib/football/tournament-api";
 import { resolverPartidoBotVsBot } from "@/lib/football/tournament-bot-resolve";
 import { computeStandings } from "@/lib/football/tournament-standings";
 import type { Tournament, TournamentSlot, TournamentFixtureMatch } from "@/lib/football/tournament-types";
@@ -31,6 +31,9 @@ export function TournamentHubScreen() {
         // que no hace nada si no hace falta.
         await avanzarRondaSiCorresponde(tournamentId!).catch((err) => {
           console.error("No se pudo avanzar de ronda al entrar al hub:", err);
+        });
+        await finalizarLigaSiCorresponde(tournamentId!).catch((err) => {
+          console.error("No se pudo verificar el fin de la liga al entrar al hub:", err);
         });
         const [t, s, f] = await Promise.all([
           fetchTorneo(tournamentId!),
@@ -109,6 +112,7 @@ export function TournamentHubScreen() {
         esEliminacionDirecta: tournament.format === "eliminacion_directa",
       });
       await avanzarRondaSiCorresponde(tournamentId);
+      await finalizarLigaSiCorresponde(tournamentId);
       const [t, s, f] = await Promise.all([
         fetchTorneo(tournamentId),
         fetchSlots(tournamentId),
@@ -130,7 +134,10 @@ export function TournamentHubScreen() {
         <button className="btn-ghost mb-4" onClick={reset}>← Salir del torneo</button>
         <h1 className="font-display text-3xl font-black">{tournament.name}</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Ronda {tournament.currentRound} de {tournament.totalRounds} ·{" "}
+          {esLiga
+            ? `Jornada ${proximo?.round ?? tournament.totalRounds} de ${tournament.totalRounds}`
+            : `Ronda ${tournament.currentRound} de ${tournament.totalRounds}`}
+          {" "}·{" "}
           {tournament.format === "eliminacion_directa"
             ? "Copa"
             : tournament.format === "liga_ida_vuelta"
