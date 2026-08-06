@@ -9,7 +9,8 @@
 
 import { supabase } from "@/lib/supabase";
 import { ensureAuthUid } from "@/lib/online/api";
-import type { Player, MatchSettings } from "@/lib/football/types";
+import { autoLineup } from "@/lib/football/bot";
+import type { Player, MatchSettings, Team } from "@/lib/football/types";
 import type {
   Tournament,
   TournamentFormat,
@@ -251,6 +252,58 @@ export async function fetchFixture(torneoId: string): Promise<TournamentFixtureM
     .order("ronda", { ascending: true });
   if (error) throw new Error(error.message);
   return (data ?? []).map((r) => rowToFixtureMatch(r as TorneoPartidoRow));
+}
+
+/**
+ * Reconstruye un Team jugable a partir de un TournamentSlot, preservando la
+ * formación/táctica guardadas al anotarse (a diferencia de makeTeamFromSquad,
+ * que siempre arranca en 4-4-2/Equilibrado). La alineación titular se
+ * recalcula con autoLineup en cada partido, porque TournamentSlot no la
+ * guarda — el usuario la puede ajustar en el vestuario antes de jugar.
+ */
+export function teamFromSlot(slot: TournamentSlot): Team {
+  const normalizedSquad: Player[] = slot.squad.map((p) => ({
+    ...p,
+    stamina: 100,
+    onField: false,
+    redCarded: false,
+    yellowCards: 0,
+    injured: false,
+    fieldPosition: undefined,
+    slotIndex: undefined,
+  }));
+  const starting = autoLineup(normalizedSquad, slot.formation);
+  const starters = normalizedSquad.filter((p) => starting.includes(p.id));
+  const captain = starters.length
+    ? starters.reduce((a, b) => (a.overall > b.overall ? a : b), starters[0])
+    : normalizedSquad[0];
+  const kicker = starters.length
+    ? [...starters].sort((a, b) => b.shooting - a.shooting)[0]
+    : normalizedSquad[0];
+  return {
+    config: slot.teamConfig,
+    squad: normalizedSquad,
+    formation: slot.formation,
+    starting,
+    style: slot.style,
+    lineHeight: slot.lineHeight,
+    buildUp: slot.buildUp,
+    pressIntensity: slot.pressIntensity,
+    captainId: captain?.id,
+    penaltyTakerId: kicker?.id,
+    setPieceTakerId: kicker?.id,
+    substitutionsLeft: 5,
+    redCards: 0,
+    yellowCards: 0,
+    shots: 0,
+    shotsOnTarget: 0,
+    corners: 0,
+    fouls: 0,
+    possession: 0,
+    goals: 0,
+    xg: 0,
+    saves: 0,
+  };
 }
 
 export async function fetchTorneo(torneoId: string): Promise<Tournament> {
