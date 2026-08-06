@@ -91,6 +91,12 @@ interface GameCtx {
   /** Id de torneo_partidos que se está jugando ahora mismo (para escribir el resultado al terminar). */
   tournamentActiveMatchId: string | null;
   setTournamentActiveMatchId: (id: string | null) => void;
+  /** True si el partido activo pertenece a un torneo de Eliminación directa (define si un empate va a penales). */
+  tournamentActiveMatchIsKnockout: boolean;
+  setTournamentActiveMatchIsKnockout: (v: boolean) => void;
+  /** Resultado de la tanda de penales del último partido, si hubo — para mostrarlo en StatsScreen. */
+  tournamentPenaltyResult: { homeGoals: number; awayGoals: number } | null;
+  setTournamentPenaltyResult: (r: { homeGoals: number; awayGoals: number } | null) => void;
   settings: MatchSettings;
   setSettings: (s: MatchSettings) => void;
   activeLockerTeam: 0 | 1;
@@ -114,6 +120,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [lastMatchStats, setLastMatchStats] = useState<Record<string, PlayerMatchStats>>({});
   const [tournamentId, setTournamentId] = useState<string | null>(null);
   const [tournamentActiveMatchId, setTournamentActiveMatchId] = useState<string | null>(null);
+  const [tournamentActiveMatchIsKnockout, setTournamentActiveMatchIsKnockout] = useState(false);
+  const [tournamentPenaltyResult, setTournamentPenaltyResult] = useState<{ homeGoals: number; awayGoals: number } | null>(null);
 
   const value = useMemo<GameCtx>(() => ({
     screen, setScreen,
@@ -124,6 +132,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
     lastMatchStats, setLastMatchStats,
     tournamentId, setTournamentId,
     tournamentActiveMatchId, setTournamentActiveMatchId,
+    tournamentActiveMatchIsKnockout, setTournamentActiveMatchIsKnockout,
+    tournamentPenaltyResult, setTournamentPenaltyResult,
     reset: () => {
       setTeams([null, null]);
       setActiveLockerTeam(0);
@@ -131,9 +141,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setLastMatchStats({});
       setTournamentId(null);
       setTournamentActiveMatchId(null);
+      setTournamentActiveMatchIsKnockout(false);
+      setTournamentPenaltyResult(null);
       setScreen("home");
     },
-  }), [screen, teams, settings, activeLockerTeam, testMode, lastMatchStats, tournamentId, tournamentActiveMatchId]);
+  }), [screen, teams, settings, activeLockerTeam, testMode, lastMatchStats, tournamentId, tournamentActiveMatchId, tournamentActiveMatchIsKnockout, tournamentPenaltyResult]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

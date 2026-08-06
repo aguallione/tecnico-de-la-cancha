@@ -315,3 +315,70 @@ export async function fetchTorneo(torneoId: string): Promise<Tournament> {
   if (error) throw new Error(error.message);
   return rowToTournament(data as TorneoRow);
 }
+
+function ganadorDe(m: TournamentFixtureMatch): string {
+  if (!m.result) throw new Error("No se puede determinar el ganador de un partido sin resultado.");
+  if (m.result.penalties) {
+    return m.result.penalties.homeGoals > m.result.penalties.awayGoals ? m.homeSlotId : m.awaySlotId;
+  }
+  return m.result.homeGoals >= m.result.awayGoals ? m.homeSlotId : m.awaySlotId;
+}
+
+/**
+ * Solo aplica a Eliminación directa. Revisa si todos los partidos de la
+ * ronda actual del torneo ya están jugados; si es así, genera los cruces
+ * de la siguiente ronda emparejando ganadores por posición de bracket, o
+ * si solo queda un ganador, declara campeón y cierra el torneo.
+ * Idempotente: si se llama de nuevo sin cambios, no hace nada (porque ya
+ * no quedan partidos "pendiente" en la ronda actual la próxima vez que
+ * se revise, dado que la ronda ya avanzó).
+ */
+export async function avanzarRondaSiCorresponde(torneoId: string): Promise<void> {
+  const torneo = await fetchTorneo(torneoId);
+  if (torneo.format !== "eliminacion_directa" || torneo.status === "finalizado") return;
+
+  const fixture = await fetchFixture(torneoId);
+  const partidosRonda = fixture.filter((m) => m.round === torneo.currentRound);
+  if (partidosRonda.length === 0) return;
+  const todosResueltos = partidosRonda.every((m) => m.status === "jugado" || m.status === "walkover");
+  if (!todosResueltos) return;
+
+  const ordenados = [...partidosRonda].sort(
+    (a, b) => (a.bracketPosition ?? 0) - (b.bracketPosition ?? 0),
+  );
+  const ganadores = ordenados.map(ganadorDe);
+
+  if (ganadores.length === 1) {
+    const { error } = await supabase
+      .from("torneos")
+      .update({
+        estado: "finalizado",
+        campeon_slot_id: ganadores[0],
+        finalizado_en: new Date().toISOString(),
+      })
+      .eq("id", torneoId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  const nuevaRonda = torneo.currentRound + 1;
+  const filas = [];
+  for (let i = 0; i < ganadores.length / 2; i++) {
+    filas.push({
+      torneo_id: torneoId,
+      ronda: nuevaRonda,
+      slot_local_id: ganadores[i * 2],
+      slot_visitante_id: ganadores[i * 2 + 1],
+      posicion_bracket: i,
+    });
+  }
+
+  const { error: insertError } = await supabase.from("torneo_partidos").insert(filas);
+  if (insertError) throw new Error(insertError.message);
+
+  const { error: updateError } = await supabase
+    .from("torneos")
+    .update({ ronda_actual: nuevaRonda })
+    .eq("id", torneoId);
+  if (updateError) throw new Error(updateError.message);
+}
