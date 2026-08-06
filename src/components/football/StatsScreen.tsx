@@ -5,9 +5,15 @@ import { slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import type { Team, PlayerMatchStats } from "@/lib/football/types";
 
 export function StatsScreen() {
-  const { teams, reset, testMode, setScreen, setTeams, lastMatchStats } = useGame();
+  const { teams, reset, testMode, setScreen, setTeams, lastMatchStats, tournamentActiveMatchId, setTournamentActiveMatchId } = useGame();
   const [a, b] = teams;
   if (!a || !b) return null;
+
+  function volverAlTorneo() {
+    setTournamentActiveMatchId(null);
+    setTeams([null, null]);
+    setScreen("tournament_hub");
+  }
 
   const posTotal = a.possession + b.possession || 1;
   const posA = Math.round((a.possession / posTotal) * 100);
@@ -88,7 +94,11 @@ export function StatsScreen() {
               <button className="btn-primary flex-1" onClick={repeatMatch}>Repetir partido</button>
             </>
           ) : null}
-          <button className="btn-ghost flex-1" onClick={reset}>{testMode ? "Salir" : "Nueva partida"}</button>
+          {tournamentActiveMatchId ? (
+            <button className="btn-primary flex-1" onClick={volverAlTorneo}>Volver al torneo →</button>
+          ) : (
+            <button className="btn-ghost flex-1" onClick={reset}>{testMode ? "Salir" : "Nueva partida"}</button>
+          )}
         </div>
       </div>
     </div>

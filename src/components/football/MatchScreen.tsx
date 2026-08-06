@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/lib/football/store";
 import { initMatch, substitute, tickMinute, possessionPct, computePlayerPositionRating, type MatchState } from "@/lib/football/engine";
+import { escribirResultadoTorneoPartido } from "@/lib/football/tournament-server-fns";
 import { autoLineup } from "@/lib/football/bot";
 import { FORMATION_LIST, slotsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
@@ -22,9 +23,10 @@ const EMERGENCY_FORMATION: FormationName = "5-3-2";
 const TICK_MS = 900;
 
 export function MatchScreen() {
-  const { setScreen, teams, settings, setLastMatchStats } = useGame();
+  const { setScreen, teams, settings, setLastMatchStats, tournamentActiveMatchId } = useGame();
   const [a, b] = teams;
   const stateRef = useRef<MatchState | null>(null);
+  const resultadoTorneoEnviadoRef = useRef(false);
   const [, force] = useState(0);
   const rerender = () => force((n) => n + 1);
   const [paused, setPaused] = useState(false);
@@ -75,6 +77,22 @@ export function MatchScreen() {
       rerender();
       if (s.finished) {
         setLastMatchStats(s.playerStats);
+        if (tournamentActiveMatchId && !resultadoTorneoEnviadoRef.current) {
+          resultadoTorneoEnviadoRef.current = true;
+          escribirResultadoTorneoPartido({
+            data: {
+              torneo_partido_id: tournamentActiveMatchId,
+              resultado: {
+                homeGoals: s.teams[0].goals,
+                awayGoals: s.teams[1].goals,
+                stats: { players: s.playerStats },
+                events: s.events,
+              },
+            },
+          }).catch((err) => {
+            console.error("No se pudo guardar el resultado del torneo:", err);
+          });
+        }
         setTimeout(() => setScreen("stats"), 1500);
       }
     }, TICK_MS / speed);
