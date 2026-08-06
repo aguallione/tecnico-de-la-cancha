@@ -7,7 +7,7 @@ import type { Tournament, TournamentSlot, TournamentFixtureMatch } from "@/lib/f
 export function TournamentHubScreen() {
   const {
     tournamentId, reset, setScreen, setSettings, setTeams,
-    setActiveLockerTeam, setTournamentActiveMatchId,
+    setActiveLockerTeam, setTournamentActiveMatchId, setTournamentActiveMatchIsKnockout,
   } = useGame();
 
   const [tournament, setTournament] = useState<Tournament | null>(null);
@@ -80,6 +80,7 @@ export function TournamentHubScreen() {
     setTeams([teamFromSlot(home), teamFromSlot(away)]);
     setActiveLockerTeam(0);
     setTournamentActiveMatchId(m.id);
+    setTournamentActiveMatchIsKnockout(tournament.format === "eliminacion_directa");
     setScreen("handoff");
   }
 
