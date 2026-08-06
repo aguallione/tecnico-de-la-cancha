@@ -174,9 +174,16 @@ export function TournamentHubScreen() {
                 </button>
               )}
             </div>
+          ) : tournament.status === "finalizado" ? (
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <p className="text-sm text-muted-foreground">El torneo ya terminó.</p>
+              <button className="btn-primary" onClick={() => setScreen("tournament_final")}>
+                Ver resumen →
+              </button>
+            </div>
           ) : (
             <p className="text-sm text-muted-foreground mt-2">
-              {tournament.status === "finalizado" ? "El torneo ya terminó." : "No quedan partidos pendientes en esta ronda."}
+              No quedan partidos pendientes en esta ronda.
             </p>
           )}
         </div>
