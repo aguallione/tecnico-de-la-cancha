@@ -11,6 +11,7 @@ import { ConfirmScreen } from "@/components/football/ConfirmScreen";
 import { MatchScreen } from "@/components/football/MatchScreen";
 import { StatsScreen } from "@/components/football/StatsScreen";
 import { TestScreen } from "@/components/football/TestScreen";
+import { TournamentListScreen } from "@/components/football/TournamentListScreen";
 import { TournamentSetupScreen } from "@/components/football/TournamentSetupScreen";
 import { TournamentHubScreen } from "@/components/football/TournamentHubScreen";
 import { OnlineLobbyScreen } from "@/components/online/OnlineLobbyScreen";
@@ -78,6 +79,7 @@ function LocalScreenSwitch({ screen }: { screen: string }) {
     case "match": return <MatchScreen />;
     case "stats": return <StatsScreen />;
     case "test": return <TestScreen />;
+    case "tournament_list": return <TournamentListScreen />;
     case "tournament_setup": return <TournamentSetupScreen />;
     case "tournament_hub": return <TournamentHubScreen />;
     default: return <HomeScreen />;

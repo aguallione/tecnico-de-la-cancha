@@ -306,6 +306,22 @@ export function teamFromSlot(slot: TournamentSlot): Team {
   };
 }
 
+/**
+ * Torneos donde el usuario actual es el creador. Por ahora es el único
+ * criterio (no hay todavía multijugador de torneo con slots de otros
+ * usuarios online — eso es parte de 4.4, se ampliará este filtro ahí).
+ */
+export async function fetchMisTorneos(): Promise<Tournament[]> {
+  const usuarioId = await ensureAuthUid();
+  const { data, error } = await supabase
+    .from("torneos")
+    .select("*")
+    .eq("creado_por", usuarioId)
+    .order("creado_en", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => rowToTournament(r as TorneoRow));
+}
+
 export async function fetchTorneo(torneoId: string): Promise<Tournament> {
   const { data, error } = await supabase
     .from("torneos")

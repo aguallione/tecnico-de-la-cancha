@@ -13,6 +13,7 @@ export type Screen =
   | "match"
   | "stats"
   | "test"
+  | "tournament_list"
   | "tournament_setup"
   | "tournament_hub"
   | "tournament_standings"

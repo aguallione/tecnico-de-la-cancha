@@ -40,6 +40,12 @@ export function HomeScreen() {
           >
             Nuevo torneo (Liga / Copa)
           </button>
+          <button
+            onClick={() => setScreen("tournament_list")}
+            className="btn-ghost"
+          >
+            Mis torneos
+          </button>
 
           {/* Separador online */}
           <div className="flex items-center gap-3 my-1">

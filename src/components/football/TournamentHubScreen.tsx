@@ -138,6 +138,9 @@ export function TournamentHubScreen() {
           )}
         </div>
 
+        {/* Cuadro de eliminación (Copa) */}
+        {!esLiga && <TournamentBracket fixture={fixture} nombreSlot={nombreSlot} />}
+
         {/* Tabla de posiciones */}
         {esLiga && (
           <div className="card p-4 mt-4">
@@ -190,6 +193,110 @@ export function TournamentHubScreen() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function TournamentBracket({
+  fixture,
+  nombreSlot,
+}: {
+  fixture: TournamentFixtureMatch[];
+  nombreSlot: (id: string) => string;
+}) {
+  const rounds = Array.from(new Set(fixture.map((m) => m.round))).sort((a, b) => a - b);
+
+  return (
+    <div className="card p-4 mt-4">
+      <h2 className="font-display text-lg font-bold">Cuadro de eliminación</h2>
+      <div className="mt-3 flex gap-4 overflow-x-auto pb-2">
+        {rounds.map((round, i) => {
+          const partidos = fixture
+            .filter((m) => m.round === round)
+            .sort((a, b) => (a.bracketPosition ?? 0) - (b.bracketPosition ?? 0));
+          const esFinal = i === rounds.length - 1;
+          return (
+            <div key={round} className="min-w-[180px] flex-1">
+              <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2 text-center">
+                {esFinal ? "Final" : `Ronda ${round}`}
+              </div>
+              <div className="flex flex-col gap-3">
+                {partidos.map((m) => (
+                  <BracketMatch key={m.id} match={m} nombreSlot={nombreSlot} />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BracketMatch({
+  match,
+  nombreSlot,
+}: {
+  match: TournamentFixtureMatch;
+  nombreSlot: (id: string) => string;
+}) {
+  const jugado = match.status === "jugado";
+  let ganadorId: string | null = null;
+  if (jugado && match.result) {
+    ganadorId = match.result.penalties
+      ? (match.result.penalties.homeGoals > match.result.penalties.awayGoals ? match.homeSlotId : match.awaySlotId)
+      : (match.result.homeGoals >= match.result.awayGoals ? match.homeSlotId : match.awaySlotId);
+  } else if (match.status === "walkover") {
+    // No hay result explícito en un walkover — se muestra el cruce sin resaltar ganador.
+    ganadorId = null;
+  }
+
+  return (
+    <div className="rounded-lg border border-border overflow-hidden text-xs">
+      <BracketSlotRow
+        nombre={nombreSlot(match.homeSlotId)}
+        goles={match.result?.homeGoals}
+        penales={match.result?.penalties?.homeGoals}
+        esGanador={ganadorId === match.homeSlotId}
+        jugado={jugado}
+      />
+      <div className="border-t border-border" />
+      <BracketSlotRow
+        nombre={nombreSlot(match.awaySlotId)}
+        goles={match.result?.awayGoals}
+        penales={match.result?.penalties?.awayGoals}
+        esGanador={ganadorId === match.awaySlotId}
+        jugado={jugado}
+      />
+      {match.status === "walkover" && (
+        <div className="px-2 py-1 text-[10px] text-muted-foreground border-t border-border">Walkover</div>
+      )}
+    </div>
+  );
+}
+
+function BracketSlotRow({
+  nombre,
+  goles,
+  penales,
+  esGanador,
+  jugado,
+}: {
+  nombre: string;
+  goles?: number;
+  penales?: number;
+  esGanador: boolean;
+  jugado: boolean;
+}) {
+  return (
+    <div className={`flex items-center justify-between gap-2 px-2 py-1.5 ${esGanador ? "bg-primary/10 font-bold" : ""}`}>
+      <span className="truncate">{nombre}</span>
+      {jugado && (
+        <span className="tabular-nums shrink-0">
+          {goles}
+          {penales !== undefined ? ` (${penales})` : ""}
+        </span>
+      )}
     </div>
   );
 }
