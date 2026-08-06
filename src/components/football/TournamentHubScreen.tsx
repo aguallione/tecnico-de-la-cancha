@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useGame } from "@/lib/football/store";
-import { fetchTorneo, fetchSlots, fetchFixture, teamFromSlot } from "@/lib/football/tournament-api";
+import { fetchTorneo, fetchSlots, fetchFixture, teamFromSlot, avanzarRondaSiCorresponde } from "@/lib/football/tournament-api";
 import { computeStandings } from "@/lib/football/tournament-standings";
 import type { Tournament, TournamentSlot, TournamentFixtureMatch } from "@/lib/football/tournament-types";
 
@@ -22,6 +22,14 @@ export function TournamentHubScreen() {
     async function cargar() {
       setLoading(true);
       try {
+        // Red de seguridad: si por una conexión lenta el resultado del
+        // partido anterior llegó a Supabase después de que StatsScreen ya
+        // había intentado avanzar de ronda, esto lo vuelve a intentar acá.
+        // Es idempotente (avanzarRondaSiCorresponde ya lo garantiza), así
+        // que no hace nada si no hace falta.
+        await avanzarRondaSiCorresponde(tournamentId!).catch((err) => {
+          console.error("No se pudo avanzar de ronda al entrar al hub:", err);
+        });
         const [t, s, f] = await Promise.all([
           fetchTorneo(tournamentId!),
           fetchSlots(tournamentId!),

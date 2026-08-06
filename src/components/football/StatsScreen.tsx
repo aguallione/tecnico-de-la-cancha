@@ -1,16 +1,38 @@
+import { useEffect, useRef } from "react";
 import { useGame } from "@/lib/football/store";
 import { computePlayerPositionRating, computePlayerRating, computeTeamRating } from "@/lib/football/engine";
+import { avanzarRondaSiCorresponde } from "@/lib/football/tournament-api";
 import { POSITION_GROUP } from "@/lib/football/types";
 import { slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import type { Team, PlayerMatchStats } from "@/lib/football/types";
 
 export function StatsScreen() {
-  const { teams, reset, testMode, setScreen, setTeams, lastMatchStats, tournamentActiveMatchId, setTournamentActiveMatchId } = useGame();
+  const {
+    teams, reset, testMode, setScreen, setTeams, lastMatchStats,
+    tournamentId, tournamentActiveMatchId, setTournamentActiveMatchId,
+    tournamentPenaltyResult, setTournamentPenaltyResult,
+  } = useGame();
   const [a, b] = teams;
+  const avanceRondaEnviadoRef = useRef(false);
+
+  // Al llegar a esta pantalla desde un partido de torneo, intentar avanzar
+  // de ronda (solo tiene efecto real si el torneo es Eliminación directa y
+  // ya no quedan partidos pendientes en la ronda actual — es un no-op seguro
+  // en cualquier otro caso, avanzarRondaSiCorresponde ya lo verifica).
+  useEffect(() => {
+    if (!tournamentId || !tournamentActiveMatchId) return;
+    if (avanceRondaEnviadoRef.current) return;
+    avanceRondaEnviadoRef.current = true;
+    avanzarRondaSiCorresponde(tournamentId).catch((err) => {
+      console.error("No se pudo avanzar de ronda en el torneo:", err);
+    });
+  }, [tournamentId, tournamentActiveMatchId]);
+
   if (!a || !b) return null;
 
   function volverAlTorneo() {
     setTournamentActiveMatchId(null);
+    setTournamentPenaltyResult(null);
     setTeams([null, null]);
     setScreen("tournament_hub");
   }
@@ -52,6 +74,14 @@ export function StatsScreen() {
             </div>
             <TeamCol team={b} align="left" />
           </div>
+          {tournamentPenaltyResult && (
+            <div className="mt-3 text-center">
+              <div className="text-xs uppercase tracking-wider text-muted-foreground">Definición por penales</div>
+              <div className="font-display font-bold text-xl tabular-nums">
+                {tournamentPenaltyResult.homeGoals} - {tournamentPenaltyResult.awayGoals}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-6 card p-4">
