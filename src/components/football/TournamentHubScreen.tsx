@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useGame } from "@/lib/football/store";
 import { fetchTorneo, fetchSlots, fetchFixture, teamFromSlot, avanzarRondaSiCorresponde } from "@/lib/football/tournament-api";
+import { resolverPartidoBotVsBot } from "@/lib/football/tournament-bot-resolve";
 import { computeStandings } from "@/lib/football/tournament-standings";
 import type { Tournament, TournamentSlot, TournamentFixtureMatch } from "@/lib/football/tournament-types";
 
@@ -15,6 +16,7 @@ export function TournamentHubScreen() {
   const [fixture, setFixture] = useState<TournamentFixtureMatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [resolviendoId, setResolviendoId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!tournamentId) return;
@@ -92,6 +94,36 @@ export function TournamentHubScreen() {
     setScreen("handoff");
   }
 
+  async function resolverAutomatico(m: TournamentFixtureMatch) {
+    const home = slots.find((s) => s.id === m.homeSlotId);
+    const away = slots.find((s) => s.id === m.awaySlotId);
+    if (!home || !away || !tournament || !tournamentId) return;
+    setResolviendoId(m.id);
+    setError(null);
+    try {
+      await resolverPartidoBotVsBot({
+        match: m,
+        home,
+        away,
+        matchSettings: tournament.matchSettingsTemplate,
+        esEliminacionDirecta: tournament.format === "eliminacion_directa",
+      });
+      await avanzarRondaSiCorresponde(tournamentId);
+      const [t, s, f] = await Promise.all([
+        fetchTorneo(tournamentId),
+        fetchSlots(tournamentId),
+        fetchFixture(tournamentId),
+      ]);
+      setTournament(t);
+      setSlots(s);
+      setFixture(f);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo resolver el partido automáticamente.");
+    } finally {
+      setResolviendoId(null);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground px-4 py-8">
       <div className="max-w-2xl mx-auto">
@@ -122,9 +154,13 @@ export function TournamentHubScreen() {
                 <div className="text-xs text-muted-foreground">Ronda {proximo.round}</div>
               </div>
               {esBot(proximo.homeSlotId) && esBot(proximo.awaySlotId) ? (
-                <span className="text-xs text-muted-foreground text-right max-w-[10rem]">
-                  Cruce Bot vs Bot — resolución automática pendiente (próximo paso)
-                </span>
+                <button
+                  className="btn-secondary disabled:opacity-50"
+                  disabled={resolviendoId === proximo.id}
+                  onClick={() => resolverAutomatico(proximo)}
+                >
+                  {resolviendoId === proximo.id ? "Resolviendo..." : "Resolver automático"}
+                </button>
               ) : (
                 <button className="btn-primary" onClick={() => jugarPartido(proximo)}>
                   Jugar →
