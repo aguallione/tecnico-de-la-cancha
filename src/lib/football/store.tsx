@@ -17,6 +17,7 @@ export type Screen =
   | "tournament_join"
   | "tournament_setup"
   | "tournament_hub"
+  | "tournament_locker"
   | "tournament_standings"
   | "tournament_bracket"
   | "tournament_match_summary"

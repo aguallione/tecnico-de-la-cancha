@@ -38,6 +38,16 @@ export interface TournamentSlot {
   ownerUserId?: string;
   equipoGuardadoId?: string;
   seed: number;
+  /**
+   * Alineación titular guardada por el dueño del slot en el Vestuario del
+   * torneo (ids de Player). Si no está seteada, o quedó inválida (por
+   * ejemplo algún id ya no existe en squad), teamFromSlot recurre a
+   * autoLineup como hasta ahora.
+   */
+  starting?: string[];
+  captainId?: string;
+  penaltyTakerId?: string;
+  setPieceTakerId?: string;
 }
 
 /** Resultado de una tanda de penales, calculada aparte del resultado reglamentario. */
@@ -64,6 +74,8 @@ export interface TournamentFixtureMatch {
   result?: TournamentMatchResult;
   partidaOnlineId?: string;
   bracketPosition?: number;
+  /** Solo para torneos online con modo de horario automático. Ausente en modo manual o en torneos locales. */
+  scheduledAt?: string;
 }
 
 export interface TournamentStandingRow {

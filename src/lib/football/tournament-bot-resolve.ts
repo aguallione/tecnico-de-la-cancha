@@ -1,9 +1,13 @@
 /**
- * tournament-bot-resolve.ts — resolución automática de un cruce Bot vs Bot.
+ * tournament-bot-resolve.ts — resolución automática de un cruce de torneo.
  * Corre el mismo motor (initMatch/tickMinute) que usa MatchScreen, pero en
  * un loop cerrado sin pintar ningún ticker en pantalla, hasta que el partido
  * termina. Preserva la misma integridad de "goles = tiros al arco − atajadas"
  * que cualquier partido jugado en vivo, porque es literalmente el mismo motor.
+ * No distingue bot de persona — teamFromSlot ya trata a los dos por igual,
+ * así que esto sirve tanto para un cruce Bot vs Bot (uso actual, botón
+ * "Resolver automático" en el Hub) como para la resolución automática
+ * programada de un torneo online entre personas (4.4-5 en adelante).
  */
 
 import { initMatch, tickMinute } from "./engine";
@@ -13,7 +17,7 @@ import { escribirResultadoTorneoPartido } from "./tournament-server-fns";
 import type { TournamentFixtureMatch, TournamentSlot } from "./tournament-types";
 import type { MatchSettings } from "./types";
 
-export async function resolverPartidoBotVsBot(params: {
+export async function resolverPartidoAutomatico(params: {
   match: TournamentFixtureMatch;
   home: TournamentSlot;
   away: TournamentSlot;

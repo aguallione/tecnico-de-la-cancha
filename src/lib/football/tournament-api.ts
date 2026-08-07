@@ -63,6 +63,10 @@ interface TorneoSlotRow {
   usuario_id: string | null;
   equipo_guardado_id: string | null;
   seed: number;
+  titulares: string[] | null;
+  capitan_id: string | null;
+  pateador_penales_id: string | null;
+  pateador_tiros_libres_id: string | null;
 }
 
 interface TorneoPartidoRow {
@@ -75,6 +79,7 @@ interface TorneoPartidoRow {
   resultado: TournamentFixtureMatch["result"] | null;
   partida_online_id: string | null;
   posicion_bracket: number | null;
+  hora_programada: string | null;
 }
 
 // ─── Conversión fila → tipo de dominio ──────────────────────────────────────
@@ -119,6 +124,10 @@ function rowToSlot(row: TorneoSlotRow): TournamentSlot {
     ownerUserId: row.usuario_id ?? undefined,
     equipoGuardadoId: row.equipo_guardado_id ?? undefined,
     seed: row.seed,
+    starting: row.titulares ?? undefined,
+    captainId: row.capitan_id ?? undefined,
+    penaltyTakerId: row.pateador_penales_id ?? undefined,
+    setPieceTakerId: row.pateador_tiros_libres_id ?? undefined,
   };
 }
 
@@ -132,7 +141,35 @@ function rowToFixtureMatch(row: TorneoPartidoRow): TournamentFixtureMatch {
     result: row.resultado ?? undefined,
     partidaOnlineId: row.partida_online_id ?? undefined,
     bracketPosition: row.posicion_bracket ?? undefined,
+    scheduledAt: row.hora_programada ?? undefined,
   };
+}
+
+/**
+ * Calcula la hora programada de un partido de torneo online: un ancla
+ * (normalmente "ahora", el momento en que se genera esa tanda de partidos)
+ * más un desplazamiento en horas, y si el torneo tiene horario aleatorio
+ * activado, reemplaza la hora del día por un horario al azar dentro del
+ * rango configurado (mismo día calculado por el desplazamiento).
+ */
+function calcularHoraProgramada(params: {
+  ancla: Date;
+  offsetHoras: number;
+  aleatorio: boolean;
+  rangoInicio?: string | null;
+  rangoFin?: string | null;
+}): Date {
+  const fecha = new Date(params.ancla.getTime() + params.offsetHoras * 60 * 60 * 1000);
+  if (params.aleatorio && params.rangoInicio && params.rangoFin) {
+    const [hIni, mIni] = params.rangoInicio.split(":").map(Number);
+    const [hFin, mFin] = params.rangoFin.split(":").map(Number);
+    const minIni = hIni * 60 + mIni;
+    const minFin = hFin * 60 + mFin;
+    const rango = Math.max(1, minFin - minIni);
+    const minAleatorio = minIni + Math.floor(Math.random() * rango);
+    fecha.setHours(Math.floor(minAleatorio / 60), minAleatorio % 60, 0, 0);
+  }
+  return fecha;
 }
 
 // ─── Crear torneo ────────────────────────────────────────────────────────────
@@ -256,6 +293,47 @@ export async function fetchSlots(torneoId: string): Promise<TournamentSlot[]> {
   return (data ?? []).map((r) => rowToSlot(r as TorneoSlotRow));
 }
 
+/**
+ * Actualiza formación/táctica/alineación/capitán/pateadores/roles
+ * individuales del propio slot en un torneo. NO permite cambiar la
+ * composición del plantel (qué jugadores hay) — eso queda fijo desde que
+ * te anotás. `squad` se manda igual porque ahí puede haber cambiado el
+ * `individualRole` de algún jugador ya existente.
+ */
+export async function actualizarMiSlot(params: {
+  slotId: string;
+  formation: string;
+  style: TournamentSlot["style"];
+  lineHeight: TournamentSlot["lineHeight"];
+  buildUp: TournamentSlot["buildUp"];
+  pressIntensity: TournamentSlot["pressIntensity"];
+  squad: Player[];
+  starting: string[];
+  captainId?: string;
+  penaltyTakerId?: string;
+  setPieceTakerId?: string;
+}): Promise<TournamentSlot> {
+  const { data, error } = await supabase
+    .from("torneo_slots")
+    .update({
+      formacion: params.formation,
+      estilo: params.style,
+      altura_linea: params.lineHeight,
+      salida: params.buildUp,
+      presion: params.pressIntensity,
+      plantel: params.squad,
+      titulares: params.starting,
+      capitan_id: params.captainId ?? null,
+      pateador_penales_id: params.penaltyTakerId ?? null,
+      pateador_tiros_libres_id: params.setPieceTakerId ?? null,
+    })
+    .eq("id", params.slotId)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return rowToSlot(data as TorneoSlotRow);
+}
+
 // ─── Generar fixture y arrancar el torneo ───────────────────────────────────
 
 export async function generarFixtureYArrancar(torneoId: string): Promise<void> {
@@ -285,13 +363,31 @@ export async function generarFixtureYArrancar(torneoId: string): Promise<void> {
     totalRondas = totalRondasLiga(slots.length, idaYVuelta);
   }
 
-  const filas = drafts.map((d) => ({
-    torneo_id: torneoId,
-    ronda: d.round,
-    slot_local_id: d.homeSlotId,
-    slot_visitante_id: d.awaySlotId,
-    posicion_bracket: d.bracketPosition ?? null,
-  }));
+  const ancla = new Date();
+  const filas = drafts.map((d, index) => {
+    let horaProgramada: string | null = null;
+    if (torneo.es_online && torneo.modo_horario && torneo.modo_horario !== "manual") {
+      const offsetHoras =
+        torneo.modo_horario === "automatico_simultaneo"
+          ? (d.round - 1) * (torneo.intervalo_horas ?? 24)
+          : index * (torneo.intervalo_horas ?? 24);
+      horaProgramada = calcularHoraProgramada({
+        ancla,
+        offsetHoras,
+        aleatorio: torneo.horario_aleatorio,
+        rangoInicio: torneo.rango_horario_inicio,
+        rangoFin: torneo.rango_horario_fin,
+      }).toISOString();
+    }
+    return {
+      torneo_id: torneoId,
+      ronda: d.round,
+      slot_local_id: d.homeSlotId,
+      slot_visitante_id: d.awaySlotId,
+      posicion_bracket: d.bracketPosition ?? null,
+      hora_programada: horaProgramada,
+    };
+  });
 
   const { error: insertError } = await supabase.from("torneo_partidos").insert(filas);
   if (insertError) throw new Error(insertError.message);
@@ -331,14 +427,36 @@ export function teamFromSlot(slot: TournamentSlot): Team {
     fieldPosition: undefined,
     slotIndex: undefined,
   }));
-  const starting = autoLineup(normalizedSquad, slot.formation);
+
+  const squadIds = new Set(normalizedSquad.map((p) => p.id));
+  const startingGuardado =
+    slot.starting && slot.starting.length === 11 && slot.starting.every((id) => squadIds.has(id))
+      ? slot.starting
+      : null;
+  const starting = startingGuardado ?? autoLineup(normalizedSquad, slot.formation);
   const starters = normalizedSquad.filter((p) => starting.includes(p.id));
-  const captain = starters.length
-    ? starters.reduce((a, b) => (a.overall > b.overall ? a : b), starters[0])
-    : normalizedSquad[0];
+
   const kicker = starters.length
     ? [...starters].sort((a, b) => b.shooting - a.shooting)[0]
     : normalizedSquad[0];
+
+  const captainGuardado =
+    slot.captainId && starters.some((p) => p.id === slot.captainId) ? slot.captainId : undefined;
+  const captain = captainGuardado
+    ? starters.find((p) => p.id === captainGuardado)
+    : starters.length
+      ? starters.reduce((a, b) => (a.overall > b.overall ? a : b), starters[0])
+      : normalizedSquad[0];
+
+  const penaltyGuardado =
+    slot.penaltyTakerId && starters.some((p) => p.id === slot.penaltyTakerId)
+      ? slot.penaltyTakerId
+      : undefined;
+  const setPieceGuardado =
+    slot.setPieceTakerId && starters.some((p) => p.id === slot.setPieceTakerId)
+      ? slot.setPieceTakerId
+      : undefined;
+
   return {
     config: slot.teamConfig,
     squad: normalizedSquad,
@@ -349,8 +467,8 @@ export function teamFromSlot(slot: TournamentSlot): Team {
     buildUp: slot.buildUp,
     pressIntensity: slot.pressIntensity,
     captainId: captain?.id,
-    penaltyTakerId: kicker?.id,
-    setPieceTakerId: kicker?.id,
+    penaltyTakerId: penaltyGuardado ?? kicker?.id,
+    setPieceTakerId: setPieceGuardado ?? kicker?.id,
     substitutionsLeft: 5,
     redCards: 0,
     yellowCards: 0,
@@ -519,14 +637,30 @@ export async function avanzarRondaSiCorresponde(torneoId: string): Promise<void>
   }
 
   const nuevaRonda = torneo.currentRound + 1;
+  const anclaNuevaRonda = new Date();
   const filas = [];
   for (let i = 0; i < ganadores.length / 2; i++) {
+    let horaProgramada: string | null = null;
+    if (torneo.isOnline && torneo.modoHorario && torneo.modoHorario !== "manual") {
+      const offsetHoras =
+        torneo.modoHorario === "automatico_simultaneo"
+          ? (torneo.intervaloHoras ?? 24)
+          : (i + 1) * (torneo.intervaloHoras ?? 24);
+      horaProgramada = calcularHoraProgramada({
+        ancla: anclaNuevaRonda,
+        offsetHoras,
+        aleatorio: torneo.horarioAleatorio ?? false,
+        rangoInicio: torneo.rangoHorarioInicio,
+        rangoFin: torneo.rangoHorarioFin,
+      }).toISOString();
+    }
     filas.push({
       torneo_id: torneoId,
       ronda: nuevaRonda,
       slot_local_id: ganadores[i * 2],
       slot_visitante_id: ganadores[i * 2 + 1],
       posicion_bracket: i,
+      hora_programada: horaProgramada,
     });
   }
 

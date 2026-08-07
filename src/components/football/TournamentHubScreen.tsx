@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useGame } from "@/lib/football/store";
+import { useAuth } from "@/hooks/use-auth";
 import { fetchTorneo, fetchSlots, fetchFixture, teamFromSlot, avanzarRondaSiCorresponde, finalizarLigaSiCorresponde } from "@/lib/football/tournament-api";
-import { resolverPartidoBotVsBot } from "@/lib/football/tournament-bot-resolve";
+import { resolverPartidoAutomatico } from "@/lib/football/tournament-bot-resolve";
 import { computeStandings } from "@/lib/football/tournament-standings";
 import type { Tournament, TournamentSlot, TournamentFixtureMatch } from "@/lib/football/tournament-types";
 
@@ -10,6 +11,7 @@ export function TournamentHubScreen() {
     tournamentId, reset, setScreen, setSettings, setTeams,
     setActiveLockerTeam, setTournamentActiveMatchId, setTournamentActiveMatchIsKnockout,
   } = useGame();
+  const { user } = useAuth();
 
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [slots, setSlots] = useState<TournamentSlot[]>([]);
@@ -104,7 +106,7 @@ export function TournamentHubScreen() {
     setResolviendoId(m.id);
     setError(null);
     try {
-      await resolverPartidoBotVsBot({
+      await resolverPartidoAutomatico({
         match: m,
         home,
         away,
@@ -132,7 +134,14 @@ export function TournamentHubScreen() {
     <div className="min-h-screen bg-background text-foreground px-4 py-8">
       <div className="max-w-2xl mx-auto">
         <button className="btn-ghost mb-4" onClick={reset}>← Salir del torneo</button>
-        <h1 className="font-display text-3xl font-black">{tournament.name}</h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="font-display text-3xl font-black">{tournament.name}</h1>
+          {slots.some((s) => s.ownerUserId === user?.id) && (
+            <button className="btn-secondary text-sm shrink-0" onClick={() => setScreen("tournament_locker")}>
+              Mi vestuario
+            </button>
+          )}
+        </div>
         <p className="text-muted-foreground text-sm mt-1">
           {esLiga
             ? `Jornada ${proximo?.round ?? tournament.totalRounds} de ${tournament.totalRounds}`
