@@ -33,6 +33,15 @@ export function TournamentSetupScreen() {
   const [creando, setCreando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ── Configuración online ──────────────────────────────────────────────
+  const [esOnline, setEsOnline] = useState(false);
+  const [modoHorario, setModoHorario] = useState<"manual" | "automatico_simultaneo" | "automatico_escalonado">("automatico_simultaneo");
+  const [intervaloHoras, setIntervaloHoras] = useState(72);
+  const [horarioAleatorio, setHorarioAleatorio] = useState(false);
+  const [rangoInicio, setRangoInicio] = useState("19:00");
+  const [rangoFin, setRangoFin] = useState("23:00");
+  const [codigoSalaCreado, setCodigoSalaCreado] = useState<string | null>(null);
+
   const [slots, setSlots] = useState<TournamentSlot[]>([]);
   const [arrancando, setArrancando] = useState(false);
 
@@ -56,8 +65,15 @@ export function TournamentSetupScreen() {
         formato,
         targetSlotCount,
         matchSettings: settings,
+        esOnline,
+        modoHorario: esOnline ? modoHorario : undefined,
+        horarioAleatorio: esOnline ? horarioAleatorio : undefined,
+        rangoHorarioInicio: esOnline && horarioAleatorio ? rangoInicio : undefined,
+        rangoHorarioFin: esOnline && horarioAleatorio ? rangoFin : undefined,
+        intervaloHoras: esOnline ? intervaloHoras : undefined,
       });
       setTournamentId(torneo.id);
+      setCodigoSalaCreado(torneo.roomCode ?? null);
       setPaso("equipos");
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo crear el torneo.");
@@ -224,6 +240,96 @@ export function TournamentSetupScreen() {
               </p>
             </div>
 
+            <div>
+              <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
+                Modalidad
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" className={`chip py-2 ${!esOnline ? "chip-active" : ""}`} onClick={() => setEsOnline(false)}>
+                  Local
+                </button>
+                <button type="button" className={`chip py-2 ${esOnline ? "chip-active" : ""}`} onClick={() => setEsOnline(true)}>
+                  Online
+                </button>
+              </div>
+            </div>
+
+            {esOnline && (
+              <div className="rounded-lg border border-border p-3 space-y-3">
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
+                    ¿Cómo se juegan los partidos?
+                  </label>
+                  <div className="grid grid-cols-1 gap-2">
+                    <button
+                      type="button"
+                      className={`chip py-2 text-left px-3 ${modoHorario === "automatico_simultaneo" ? "chip-active" : ""}`}
+                      onClick={() => setModoHorario("automatico_simultaneo")}
+                    >
+                      Automático: toda la ronda al mismo horario
+                    </button>
+                    <button
+                      type="button"
+                      className={`chip py-2 text-left px-3 ${modoHorario === "automatico_escalonado" ? "chip-active" : ""}`}
+                      onClick={() => setModoHorario("automatico_escalonado")}
+                    >
+                      Automático: un partido tras otro, cada tanto
+                    </button>
+                    <button
+                      type="button"
+                      className={`chip py-2 text-left px-3 ${modoHorario === "manual" ? "chip-active" : ""}`}
+                      onClick={() => setModoHorario("manual")}
+                    >
+                      Manual: yo elijo cada horario a mano
+                    </button>
+                  </div>
+                </div>
+
+                {modoHorario !== "manual" && (
+                  <>
+                    <div>
+                      <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
+                        {modoHorario === "automatico_simultaneo" ? "Horas entre ronda y ronda" : "Horas entre partido y partido"}
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        className="input w-24"
+                        value={intervaloHoras}
+                        onChange={(e) => setIntervaloHoras(Math.max(1, parseInt(e.target.value) || 1))}
+                      />
+                    </div>
+
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={horarioAleatorio}
+                        onChange={(e) => setHorarioAleatorio(e.target.checked)}
+                      />
+                      Elegir el horario al azar dentro de un rango, en vez de uno fijo
+                    </label>
+
+                    {horarioAleatorio && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">Desde</label>
+                          <input type="time" className="input w-full" value={rangoInicio} onChange={(e) => setRangoInicio(e.target.value)} />
+                        </div>
+                        <div>
+                          <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">Hasta</label>
+                          <input type="time" className="input w-full" value={rangoFin} onChange={(e) => setRangoFin(e.target.value)} />
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                <p className="text-xs text-muted-foreground">
+                  Se va a generar un código de 6 letras al crear el torneo, para que otros se anoten con su equipo.
+                </p>
+              </div>
+            )}
+
             {error && (
               <p className="text-xs text-destructive-foreground bg-destructive rounded px-2 py-1">
                 {error}
@@ -254,6 +360,14 @@ export function TournamentSetupScreen() {
         <p className="text-muted-foreground text-sm mt-1">
           {slots.length} de {targetSlotCount} equipos anotados
         </p>
+
+        {codigoSalaCreado && (
+          <div className="card p-4 mt-4 bg-primary/10 border border-primary/30 text-center">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground">Código del torneo</div>
+            <div className="font-display text-3xl font-black tracking-[0.3em] mt-1">{codigoSalaCreado}</div>
+            <p className="text-xs text-muted-foreground mt-1">Compartilo para que otros se anoten con su equipo.</p>
+          </div>
+        )}
 
         {slots.length > 0 && (
           <div className="card p-4 mt-4">

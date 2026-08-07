@@ -97,6 +97,12 @@ export interface Tournament {
   totalRounds: number;
   isOnline: boolean;
   roomCode?: string;
+  /** Solo tiene sentido si isOnline es true. Configuración de cómo se asignan los horarios de los partidos. */
+  modoHorario?: "manual" | "automatico_simultaneo" | "automatico_escalonado";
+  horarioAleatorio?: boolean;
+  rangoHorarioInicio?: string;
+  rangoHorarioFin?: string;
+  intervaloHoras?: number;
   createdByUserId: string;
   matchSettingsTemplate: MatchSettings;
   createdAt: string;

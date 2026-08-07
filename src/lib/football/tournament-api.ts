@@ -37,6 +37,11 @@ interface TorneoRow {
   total_rondas: number;
   es_online: boolean;
   codigo_sala: string | null;
+  modo_horario: "manual" | "automatico_simultaneo" | "automatico_escalonado" | null;
+  horario_aleatorio: boolean;
+  rango_horario_inicio: string | null;
+  rango_horario_fin: string | null;
+  intervalo_horas: number | null;
   creado_por: string;
   config_partido: MatchSettings;
   campeon_slot_id: string | null;
@@ -86,6 +91,11 @@ function rowToTournament(row: TorneoRow): Tournament {
     totalRounds: row.total_rondas,
     isOnline: row.es_online,
     roomCode: row.codigo_sala ?? undefined,
+    modoHorario: row.modo_horario ?? undefined,
+    horarioAleatorio: row.horario_aleatorio,
+    rangoHorarioInicio: row.rango_horario_inicio ?? undefined,
+    rangoHorarioFin: row.rango_horario_fin ?? undefined,
+    intervaloHoras: row.intervalo_horas ?? undefined,
     createdByUserId: row.creado_por,
     matchSettingsTemplate: row.config_partido,
     createdAt: row.creado_en,
@@ -127,27 +137,75 @@ function rowToFixtureMatch(row: TorneoPartidoRow): TournamentFixtureMatch {
 
 // ─── Crear torneo ────────────────────────────────────────────────────────────
 
+const LETRAS_CODIGO = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+function generarCodigoAlAzar(): string {
+  let codigo = "";
+  for (let i = 0; i < 6; i++) {
+    codigo += LETRAS_CODIGO[Math.floor(Math.random() * LETRAS_CODIGO.length)];
+  }
+  return codigo;
+}
+
+/** Reintenta hasta encontrar un código de 6 letras que no esté en uso todavía. */
+async function generarCodigoSalaUnico(): Promise<string> {
+  for (let intento = 0; intento < 10; intento++) {
+    const codigo = generarCodigoAlAzar();
+    const { data, error } = await supabase
+      .from("torneos")
+      .select("id")
+      .eq("codigo_sala", codigo)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) return codigo;
+  }
+  throw new Error("No se pudo generar un código de sala único. Probá crear el torneo de nuevo.");
+}
+
 export async function crearTorneo(params: {
   nombre: string;
   formato: TournamentFormat;
   targetSlotCount: number;
   matchSettings: MatchSettings;
+  esOnline?: boolean;
+  modoHorario?: "manual" | "automatico_simultaneo" | "automatico_escalonado";
+  horarioAleatorio?: boolean;
+  rangoHorarioInicio?: string;
+  rangoHorarioFin?: string;
+  intervaloHoras?: number;
 }): Promise<Tournament> {
   const usuarioId = await ensureAuthUid();
+  const codigoSala = params.esOnline ? await generarCodigoSalaUnico() : null;
+
   const { data, error } = await supabase
     .from("torneos")
     .insert({
       nombre: params.nombre.trim(),
       formato: params.formato,
       target_slot_count: params.targetSlotCount,
-      es_online: false,
+      es_online: params.esOnline ?? false,
+      codigo_sala: codigoSala,
       creado_por: usuarioId,
       config_partido: params.matchSettings,
+      modo_horario: params.esOnline ? (params.modoHorario ?? "manual") : null,
+      horario_aleatorio: params.esOnline ? (params.horarioAleatorio ?? false) : false,
+      rango_horario_inicio: params.esOnline && params.horarioAleatorio ? params.rangoHorarioInicio ?? null : null,
+      rango_horario_fin: params.esOnline && params.horarioAleatorio ? params.rangoHorarioFin ?? null : null,
+      intervalo_horas: params.esOnline ? params.intervaloHoras ?? null : null,
     })
     .select("*")
     .single();
   if (error) throw new Error(error.message);
-  return rowToTournament(data as TorneoRow);
+  const torneo = rowToTournament(data as TorneoRow);
+
+  if (params.esOnline) {
+    const { error: adminError } = await supabase
+      .from("torneo_admins")
+      .insert({ torneo_id: torneo.id, usuario_id: usuarioId });
+    if (adminError) throw new Error(adminError.message);
+  }
+
+  return torneo;
 }
 
 // ─── Agregar cupos ───────────────────────────────────────────────────────────
