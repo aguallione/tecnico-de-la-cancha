@@ -14,6 +14,7 @@ export type Screen =
   | "stats"
   | "test"
   | "tournament_list"
+  | "tournament_join"
   | "tournament_setup"
   | "tournament_hub"
   | "tournament_standings"

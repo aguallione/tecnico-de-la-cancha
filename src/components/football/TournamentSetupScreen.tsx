@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useGame } from "@/lib/football/store";
 import { generateSquad } from "@/lib/football/players";
 import { makeTeamFromSquad } from "@/lib/football/store";
@@ -7,7 +7,7 @@ import { SquadOriginSelector } from "@/components/football/SquadOriginSelector";
 import { useAuth } from "@/hooks/use-auth";
 import type { Player } from "@/lib/football/types";
 import type { TournamentFormat, TournamentSlot } from "@/lib/football/tournament-types";
-import { crearTorneo, agregarSlot, fetchSlots, generarFixtureYArrancar } from "@/lib/football/tournament-api";
+import { crearTorneo, agregarSlot, fetchSlots, fetchTorneo, generarFixtureYArrancar } from "@/lib/football/tournament-api";
 
 const COLORS = [
   { name: "Rojo", value: "#dc2626" },
@@ -50,6 +50,40 @@ export function TournamentSetupScreen() {
   const [colorEquipo, setColorEquipo] = useState(COLORS[0].value);
   const [squadEquipo, setSquadEquipo] = useState<Player[]>(() => generateSquad(20));
   const [agregando, setAgregando] = useState(false);
+
+  // ── Retomar un torneo "armado" ya existente (antes esto creaba un
+  // torneo nuevo duplicado en vez de retomar el que ya estaba armado) ──
+  const [initialTournamentId] = useState(tournamentId);
+
+  useEffect(() => {
+    if (!initialTournamentId) return;
+    let cancelado = false;
+    (async () => {
+      try {
+        const torneo = await fetchTorneo(initialTournamentId);
+        const slotsExistentes = await fetchSlots(initialTournamentId);
+        if (cancelado) return;
+        setNombre(torneo.name);
+        setFormato(torneo.format);
+        setTargetSlotCount(torneo.targetSlotCount);
+        setEsOnline(torneo.isOnline);
+        if (torneo.modoHorario) setModoHorario(torneo.modoHorario);
+        setHorarioAleatorio(torneo.horarioAleatorio ?? false);
+        if (torneo.rangoHorarioInicio) setRangoInicio(torneo.rangoHorarioInicio);
+        if (torneo.rangoHorarioFin) setRangoFin(torneo.rangoHorarioFin);
+        if (torneo.intervaloHoras) setIntervaloHoras(torneo.intervaloHoras);
+        setCodigoSalaCreado(torneo.roomCode ?? null);
+        setSlots(slotsExistentes);
+        setPaso("equipos");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "No se pudo cargar el torneo existente.");
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleCrearTorneo() {
     if (!nombre.trim()) return;
