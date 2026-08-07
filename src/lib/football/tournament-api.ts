@@ -27,7 +27,7 @@ import { computeStandings } from "./tournament-standings";
 
 // ─── Filas crudas de Supabase (snake_case, tal cual las columnas) ───────────
 
-interface TorneoRow {
+export interface TorneoRow {
   id: string;
   nombre: string;
   formato: TournamentFormat;
@@ -49,7 +49,7 @@ interface TorneoRow {
   finalizado_en: string | null;
 }
 
-interface TorneoSlotRow {
+export interface TorneoSlotRow {
   id: string;
   torneo_id: string;
   nombre_visible: string;
@@ -69,7 +69,7 @@ interface TorneoSlotRow {
   pateador_tiros_libres_id: string | null;
 }
 
-interface TorneoPartidoRow {
+export interface TorneoPartidoRow {
   id: string;
   torneo_id: string;
   ronda: number;
@@ -84,7 +84,7 @@ interface TorneoPartidoRow {
 
 // ─── Conversión fila → tipo de dominio ──────────────────────────────────────
 
-function rowToTournament(row: TorneoRow): Tournament {
+export function rowToTournament(row: TorneoRow): Tournament {
   return {
     id: row.id,
     name: row.nombre,
@@ -110,7 +110,7 @@ function rowToTournament(row: TorneoRow): Tournament {
   };
 }
 
-function rowToSlot(row: TorneoSlotRow): TournamentSlot {
+export function rowToSlot(row: TorneoSlotRow): TournamentSlot {
   return {
     id: row.id,
     displayName: row.nombre_visible,
@@ -131,7 +131,7 @@ function rowToSlot(row: TorneoSlotRow): TournamentSlot {
   };
 }
 
-function rowToFixtureMatch(row: TorneoPartidoRow): TournamentFixtureMatch {
+export function rowToFixtureMatch(row: TorneoPartidoRow): TournamentFixtureMatch {
   return {
     id: row.id,
     round: row.ronda,
