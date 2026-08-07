@@ -366,19 +366,40 @@ export function teamFromSlot(slot: TournamentSlot): Team {
 }
 
 /**
- * Torneos donde el usuario actual es el creador. Por ahora es el único
- * criterio (no hay todavía multijugador de torneo con slots de otros
- * usuarios online — eso es parte de 4.4, se ampliará este filtro ahí).
+ * Torneos donde el usuario actual es el creador, MÁS los torneos donde
+ * se anotó como participante con su propio equipo (ver 4.4-2b). Se
+ * combinan y ordenan por fecha de creación, sin duplicados.
  */
 export async function fetchMisTorneos(): Promise<Tournament[]> {
   const usuarioId = await ensureAuthUid();
-  const { data, error } = await supabase
+
+  const { data: creados, error: creadosError } = await supabase
     .from("torneos")
     .select("*")
-    .eq("creado_por", usuarioId)
-    .order("creado_en", { ascending: false });
-  if (error) throw new Error(error.message);
-  return (data ?? []).map((r) => rowToTournament(r as TorneoRow));
+    .eq("creado_por", usuarioId);
+  if (creadosError) throw new Error(creadosError.message);
+
+  const { data: slotsPropios, error: slotsError } = await supabase
+    .from("torneo_slots")
+    .select("torneo_id")
+    .eq("usuario_id", usuarioId);
+  if (slotsError) throw new Error(slotsError.message);
+
+  const idsYaTraidos = new Set((creados ?? []).map((t) => t.id));
+  const idsFaltantes = [...new Set((slotsPropios ?? []).map((s) => s.torneo_id))].filter(
+    (id) => !idsYaTraidos.has(id),
+  );
+
+  let unidos: TorneoRow[] = [];
+  if (idsFaltantes.length > 0) {
+    const { data, error } = await supabase.from("torneos").select("*").in("id", idsFaltantes);
+    if (error) throw new Error(error.message);
+    unidos = (data ?? []) as TorneoRow[];
+  }
+
+  const todos = [...(creados ?? []), ...unidos] as TorneoRow[];
+  todos.sort((a, b) => (a.creado_en < b.creado_en ? 1 : -1));
+  return todos.map((r) => rowToTournament(r));
 }
 
 export async function fetchTorneo(torneoId: string): Promise<Tournament> {
@@ -389,6 +410,67 @@ export async function fetchTorneo(torneoId: string): Promise<Tournament> {
     .single();
   if (error) throw new Error(error.message);
   return rowToTournament(data as TorneoRow);
+}
+
+/** Busca un torneo por su código de sala de 6 letras (no distingue mayúsculas/minúsculas). */
+export async function fetchTorneoPorCodigo(codigo: string): Promise<Tournament> {
+  const { data, error } = await supabase
+    .from("torneos")
+    .select("*")
+    .eq("codigo_sala", codigo.trim().toUpperCase())
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("No existe ningún torneo con ese código.");
+  return rowToTournament(data as TorneoRow);
+}
+
+/**
+ * Se une a un torneo online existente usando su código de sala, anotando el
+ * equipo del usuario actual como un slot nuevo. Valida que el torneo sea
+ * online, que todavía esté "armado" (no arrancado), y que el usuario no
+ * tenga ya un equipo anotado en ese mismo torneo.
+ */
+export async function unirseATorneoConCodigo(params: {
+  codigo: string;
+  displayName: string;
+  teamConfig: TournamentSlot["teamConfig"];
+  squad: Player[];
+  formation: string;
+  style: TournamentSlot["style"];
+  lineHeight: TournamentSlot["lineHeight"];
+  buildUp: TournamentSlot["buildUp"];
+  pressIntensity: TournamentSlot["pressIntensity"];
+}): Promise<{ torneo: Tournament; slot: TournamentSlot }> {
+  const usuarioId = await ensureAuthUid();
+  const torneo = await fetchTorneoPorCodigo(params.codigo);
+
+  if (!torneo.isOnline) {
+    throw new Error("Ese código no corresponde a un torneo online.");
+  }
+  if (torneo.status !== "armado") {
+    throw new Error("Ese torneo ya arrancó o ya terminó — no se pueden sumar más equipos.");
+  }
+
+  const slotsActuales = await fetchSlots(torneo.id);
+  if (slotsActuales.some((s) => s.ownerUserId === usuarioId)) {
+    throw new Error("Ya tenés un equipo anotado en este torneo.");
+  }
+
+  const slot = await agregarSlot({
+    torneoId: torneo.id,
+    displayName: params.displayName,
+    teamConfig: params.teamConfig,
+    squad: params.squad,
+    formation: params.formation,
+    style: params.style,
+    lineHeight: params.lineHeight,
+    buildUp: params.buildUp,
+    pressIntensity: params.pressIntensity,
+    ownerUserId: usuarioId,
+    seed: slotsActuales.length,
+  });
+
+  return { torneo, slot };
 }
 
 function ganadorDe(m: TournamentFixtureMatch): string {
