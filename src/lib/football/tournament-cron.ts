@@ -8,7 +8,7 @@
 
 import { getServiceClient } from "@/lib/online/supabase-server";
 import { resolverPartidoAutomatico } from "./tournament-bot-resolve";
-import { avanzarRondaSiCorresponde } from "./tournament-api";
+import { avanzarRondaSiCorresponde, finalizarLigaSiCorresponde } from "./tournament-api";
 import { rowToFixtureMatch, rowToSlot, type TorneoPartidoRow, type TorneoSlotRow } from "./tournament-api";
 
 export interface ResolucionMasivaResultado {
@@ -72,6 +72,11 @@ export async function resolverPartidosVencidos(): Promise<ResolucionMasivaResult
       await avanzarRondaSiCorresponde(torneoId);
     } catch (e) {
       errores.push(`Avance de ronda, torneo ${torneoId}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    try {
+      await finalizarLigaSiCorresponde(torneoId);
+    } catch (e) {
+      errores.push(`Cierre de liga, torneo ${torneoId}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
