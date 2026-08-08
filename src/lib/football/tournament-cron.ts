@@ -1,28 +1,61 @@
 /**
- * tournament-cron.ts — resolución masiva de partidos online vencidos.
- * Pensado para ser invocado por un endpoint HTTP protegido (ver
- * routes/api/resolver-torneos.ts), disparado periódicamente por
- * pg_cron + pg_net desde Supabase (4.4-6, sin construir todavía).
+ * tournament-cron.ts — arranque y avance en tiempo real de partidos online
+ * de torneo. Invocado periódicamente (cada 1 minuto) por
+ * routes/api/resolver-torneos.ts, disparado por pg_cron desde Supabase.
  * Usa service_role: nadie llama esto desde el navegador.
+ *
+ * Reemplaza el enfoque de 4.4-5 (resolución instantánea en el fondo) por
+ * uno de dos fases:
+ *   1) arrancarPartidosVencidos: crea una partidas_online real cuando llega
+ *      la hora programada, en vez de resolver todo de una.
+ *   2) avanzarPartidosEnCurso: hace que cada partido en curso "se ponga al
+ *      día" según el ritmo real definido en tournament-pacing.ts (1 minuto
+ *      de juego cada 5 segundos reales, con pausa de entretiempo) — no un
+ *      bloque fijo de minutos por pasada.
+ * Todavía NO conecta intervención humana en vivo (eso es 4.4-6d) ni la IA
+ * co-DT (4.4-6c) — mientras nadie interviene, el partido avanza solo con
+ * el motor puro, igual que después va a hacerlo la IA en nivel "ninguna".
  */
 
 import { getServiceClient } from "@/lib/online/supabase-server";
-import { resolverPartidoAutomatico } from "./tournament-bot-resolve";
-import { avanzarRondaSiCorresponde, finalizarLigaSiCorresponde } from "./tournament-api";
-import { rowToFixtureMatch, rowToSlot, type TorneoPartidoRow, type TorneoSlotRow } from "./tournament-api";
+import { generarCodigo } from "@/lib/online/api";
+import { initMatch, tickMinute } from "./engine";
+import { serializeMatchState, deserializeMatchState, type SerializedMatchState } from "./serialization";
+import { minutoObjetivo } from "./tournament-pacing";
+import { simulatePenaltyShootout } from "./tournament-penalties";
+import { escribirResultadoTorneoPartido } from "./tournament-server-fns";
+import {
+  avanzarRondaSiCorresponde,
+  finalizarLigaSiCorresponde,
+  rowToFixtureMatch,
+  rowToSlot,
+  teamFromSlot,
+  type TorneoPartidoRow,
+  type TorneoSlotRow,
+} from "./tournament-api";
+import type { MatchSettings } from "./types";
 
-export interface ResolucionMasivaResultado {
-  resueltos: number;
+export interface ResolucionCronResultado {
+  arrancados: number;
+  avanzados: number;
+  terminados: number;
   errores: string[];
 }
 
-export async function resolverPartidosVencidos(): Promise<ResolucionMasivaResultado> {
+/**
+ * Busca partidos "pendiente" de torneos online en curso, cuya hora
+ * programada ya pasó, y les crea una partidas_online real (con el
+ * MatchState recién inicializado), pasándolos a estado "en_curso".
+ */
+async function arrancarPartidosVencidos(): Promise<{ arrancados: number; errores: string[] }> {
   const supabase = getServiceClient();
   const ahoraIso = new Date().toISOString();
+  const errores: string[] = [];
+  let arrancados = 0;
 
-  const { data: partidosVencidosRaw, error } = await supabase
+  const { data: filasRaw, error } = await supabase
     .from("torneo_partidos")
-    .select("*, torneos!inner(es_online, estado, formato, config_partido)")
+    .select("*, torneos!inner(es_online, estado, config_partido)")
     .eq("estado", "pendiente")
     .eq("torneos.es_online", true)
     .eq("torneos.estado", "en_curso")
@@ -30,18 +63,11 @@ export async function resolverPartidosVencidos(): Promise<ResolucionMasivaResult
     .lte("hora_programada", ahoraIso);
 
   if (error) throw new Error(error.message);
-  if (!partidosVencidosRaw || partidosVencidosRaw.length === 0) {
-    return { resueltos: 0, errores: [] };
-  }
+  if (!filasRaw || filasRaw.length === 0) return { arrancados: 0, errores: [] };
 
-  let resueltos = 0;
-  const errores: string[] = [];
-  const torneoIdsAfectados = new Set<string>();
-
-  for (const row of partidosVencidosRaw as Array<TorneoPartidoRow & { torneos: { es_online: boolean; estado: string; formato: string; config_partido: any } }>) {
+  for (const row of filasRaw as Array<TorneoPartidoRow & { torneos: { config_partido: MatchSettings } }>) {
     try {
       const match = rowToFixtureMatch(row);
-      torneoIdsAfectados.add(row.torneo_id);
 
       const { data: slotsData, error: slotsError } = await supabase
         .from("torneo_slots")
@@ -54,16 +80,126 @@ export async function resolverPartidosVencidos(): Promise<ResolucionMasivaResult
       const away = slots.find((s) => s.id === match.awaySlotId);
       if (!home || !away) throw new Error(`Faltan slots para el partido ${match.id}.`);
 
-      await resolverPartidoAutomatico({
-        match,
-        home,
-        away,
-        matchSettings: row.torneos.config_partido,
-        esEliminacionDirecta: row.torneos.formato === "eliminacion_directa",
-      });
-      resueltos++;
+      const teamA = teamFromSlot(home);
+      const teamB = teamFromSlot(away);
+      const state = initMatch([teamA, teamB], row.torneos.config_partido);
+      const serialized = serializeMatchState(state);
+
+      const { data: partidaCreada, error: partidaError } = await supabase
+        .from("partidas_online")
+        .insert({
+          codigo: generarCodigo(),
+          estado: "jugando",
+          admin_device_id: `torneo:${match.id}`,
+          controller_device_id: `torneo:${match.id}`,
+          configuracion: row.torneos.config_partido,
+          equipo_0: state.teams[0],
+          equipo_1: state.teams[1],
+          match_state: serialized,
+          velocidad: "normal",
+          bloque_minutos: 1,
+        })
+        .select("id")
+        .single();
+      if (partidaError) throw new Error(partidaError.message);
+
+      const { error: updateError } = await supabase
+        .from("torneo_partidos")
+        .update({ estado: "en_curso", partida_online_id: partidaCreada.id })
+        .eq("id", match.id);
+      if (updateError) throw new Error(updateError.message);
+
+      arrancados++;
     } catch (e) {
-      errores.push(`Partido ${row.id}: ${e instanceof Error ? e.message : String(e)}`);
+      errores.push(`Arranque partido ${row.id}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  return { arrancados, errores };
+}
+
+/**
+ * Busca partidos "en_curso" cuya partidas_online todavía dice "jugando",
+ * los pone al día según el ritmo real (tournament-pacing.ts), y si
+ * terminan, escribe el resultado final (con penales si corresponde) y
+ * avanza el torneo.
+ */
+async function avanzarPartidosEnCurso(): Promise<{ avanzados: number; terminados: number; errores: string[] }> {
+  const supabase = getServiceClient();
+  const errores: string[] = [];
+  let avanzados = 0;
+  let terminados = 0;
+
+  const { data: filasRaw, error } = await supabase
+    .from("torneo_partidos")
+    .select("*, torneos!inner(formato)")
+    .eq("estado", "en_curso")
+    .not("partida_online_id", "is", null);
+
+  if (error) throw new Error(error.message);
+  if (!filasRaw || filasRaw.length === 0) return { avanzados: 0, terminados: 0, errores: [] };
+
+  const torneoIdsAfectados = new Set<string>();
+
+  for (const row of filasRaw as Array<TorneoPartidoRow & { torneos: { formato: string } }>) {
+    try {
+      const { data: partida, error: partidaError } = await supabase
+        .from("partidas_online")
+        .select("id, estado, match_state, creado_en")
+        .eq("id", row.partida_online_id)
+        .maybeSingle();
+      if (partidaError) throw new Error(partidaError.message);
+      if (!partida || !partida.match_state) continue;
+      if (partida.estado !== "jugando") continue;
+
+      const state = deserializeMatchState(partida.match_state as SerializedMatchState);
+      if (state.finished) continue;
+
+      const segundosTranscurridos = (Date.now() - new Date(partida.creado_en).getTime()) / 1000;
+      const objetivo = minutoObjetivo(segundosTranscurridos);
+      while (state.minute < objetivo && !state.finished) {
+        tickMinute(state);
+      }
+      avanzados++;
+      torneoIdsAfectados.add(row.torneo_id);
+
+      if (!state.finished) {
+        const { error: updateError } = await supabase
+          .from("partidas_online")
+          .update({ match_state: serializeMatchState(state), actualizado_en: new Date().toISOString() })
+          .eq("id", partida.id);
+        if (updateError) throw new Error(updateError.message);
+        continue;
+      }
+
+      // Partido terminado en esta pasada: cerrar y escribir el resultado del torneo.
+      const { error: cierrePartidaError } = await supabase
+        .from("partidas_online")
+        .update({ match_state: serializeMatchState(state), estado: "terminado", actualizado_en: new Date().toISOString() })
+        .eq("id", partida.id);
+      if (cierrePartidaError) throw new Error(cierrePartidaError.message);
+
+      const empatado = state.teams[0].goals === state.teams[1].goals;
+      const penalties =
+        row.torneos.formato === "eliminacion_directa" && empatado
+          ? simulatePenaltyShootout([state.teams[0], state.teams[1]]).result
+          : undefined;
+
+      await escribirResultadoTorneoPartido({
+        data: {
+          torneo_partido_id: row.id,
+          resultado: {
+            homeGoals: state.teams[0].goals,
+            awayGoals: state.teams[1].goals,
+            stats: { players: state.playerStats },
+            events: state.events,
+            ...(penalties ? { penalties } : {}),
+          },
+        },
+      });
+      terminados++;
+    } catch (e) {
+      errores.push(`Avance partido ${row.id}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -80,5 +216,16 @@ export async function resolverPartidosVencidos(): Promise<ResolucionMasivaResult
     }
   }
 
-  return { resueltos, errores };
+  return { avanzados, terminados, errores };
+}
+
+export async function resolverPartidosVencidos(): Promise<ResolucionCronResultado> {
+  const { arrancados, errores: erroresArranque } = await arrancarPartidosVencidos();
+  const { avanzados, terminados, errores: erroresAvance } = await avanzarPartidosEnCurso();
+  return {
+    arrancados,
+    avanzados,
+    terminados,
+    errores: [...erroresArranque, ...erroresAvance],
+  };
 }
