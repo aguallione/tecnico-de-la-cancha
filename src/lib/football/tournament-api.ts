@@ -16,6 +16,7 @@ import type {
   TournamentFormat,
   TournamentSlot,
   TournamentFixtureMatch,
+  AiInterventionLevel,
 } from "./tournament-types";
 import {
   generateRoundRobinFixture,
@@ -37,6 +38,7 @@ export interface TorneoRow {
   total_rondas: number;
   es_online: boolean;
   codigo_sala: string | null;
+  nivel_ia: AiInterventionLevel | null;
   modo_horario: "manual" | "automatico_simultaneo" | "automatico_escalonado" | null;
   horario_aleatorio: boolean;
   rango_horario_inicio: string | null;
@@ -75,7 +77,7 @@ export interface TorneoPartidoRow {
   ronda: number;
   slot_local_id: string;
   slot_visitante_id: string;
-  estado: "pendiente" | "jugado" | "walkover";
+  estado: "pendiente" | "en_curso" | "jugado" | "walkover";
   resultado: TournamentFixtureMatch["result"] | null;
   partida_online_id: string | null;
   posicion_bracket: number | null;
@@ -96,6 +98,7 @@ export function rowToTournament(row: TorneoRow): Tournament {
     totalRounds: row.total_rondas,
     isOnline: row.es_online,
     roomCode: row.codigo_sala ?? undefined,
+    aiInterventionLevel: row.nivel_ia ?? undefined,
     modoHorario: row.modo_horario ?? undefined,
     horarioAleatorio: row.horario_aleatorio,
     rangoHorarioInicio: row.rango_horario_inicio ?? undefined,
@@ -210,6 +213,7 @@ export async function crearTorneo(params: {
   rangoHorarioInicio?: string;
   rangoHorarioFin?: string;
   intervaloHoras?: number;
+  aiInterventionLevel?: AiInterventionLevel;
 }): Promise<Tournament> {
   const usuarioId = await ensureAuthUid();
   const codigoSala = params.esOnline ? await generarCodigoSalaUnico() : null;
@@ -229,6 +233,7 @@ export async function crearTorneo(params: {
       rango_horario_inicio: params.esOnline && params.horarioAleatorio ? params.rangoHorarioInicio ?? null : null,
       rango_horario_fin: params.esOnline && params.horarioAleatorio ? params.rangoHorarioFin ?? null : null,
       intervalo_horas: params.esOnline ? params.intervaloHoras ?? null : null,
+      nivel_ia: params.esOnline ? (params.aiInterventionLevel ?? "ninguna") : null,
     })
     .select("*")
     .single();

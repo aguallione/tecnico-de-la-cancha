@@ -19,7 +19,16 @@ export type TournamentFormat =
 
 export type TournamentStatus = "armado" | "en_curso" | "finalizado";
 
-export type FixtureMatchStatus = "pendiente" | "jugado" | "walkover";
+export type FixtureMatchStatus = "pendiente" | "en_curso" | "jugado" | "walkover";
+
+/**
+ * Nivel de intervención de la IA "co-DT" cuando el usuario dueño de un slot
+ * no está presente en un partido de torneo online que ya arrancó. "ninguna"
+ * = el equipo juega con la config guardada, sin ajustes en vivo (equivalente
+ * al comportamiento de resolverPartidoAutomatico hasta ahora). Solo aplica
+ * a torneos online — no tiene sentido en un torneo local.
+ */
+export type AiInterventionLevel = "ninguna" | "poca" | "media" | "mucha";
 
 /**
  * Un "cupo" dentro del torneo. El plantel es una foto fija tomada al
@@ -115,6 +124,8 @@ export interface Tournament {
   rangoHorarioInicio?: string;
   rangoHorarioFin?: string;
   intervaloHoras?: number;
+  /** Solo tiene sentido si isOnline es true. Elegido al crear el torneo, no se puede cambiar después de arrancado. */
+  aiInterventionLevel?: AiInterventionLevel;
   createdByUserId: string;
   matchSettingsTemplate: MatchSettings;
   createdAt: string;
