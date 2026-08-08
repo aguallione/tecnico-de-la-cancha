@@ -119,6 +119,79 @@ async function arrancarPartidosVencidos(): Promise<{ arrancados: number; errores
 }
 
 /**
+ * Pone al día UN partido de torneo (según tournament-pacing.ts) hasta el
+ * minuto que le corresponda por tiempo real transcurrido. Compartida entre
+ * el vigilante de pg_cron (que la llama para todos los partidos en curso,
+ * una vez por minuto) y el polling del navegador cuando alguien está
+ * mirando en vivo (que la llama cada 5 segundos, para un ritmo suave) —
+ * así el comportamiento es idéntico sea quien sea el que la dispare.
+ * No valida nada de autorización — quien la exponga al cliente (ver
+ * tournament-server-fns.ts) es responsable de esa parte.
+ */
+export async function ponerAlDiaPartidoTorneo(
+  torneoPartidoId: string,
+  partidaOnlineId: string,
+  formato: string,
+): Promise<"avanzo" | "termino" | "sin_cambios"> {
+  const supabase = getServiceClient();
+
+  const { data: partida, error: partidaError } = await supabase
+    .from("partidas_online")
+    .select("id, estado, match_state, creado_en")
+    .eq("id", partidaOnlineId)
+    .maybeSingle();
+  if (partidaError) throw new Error(partidaError.message);
+  if (!partida || !partida.match_state) return "sin_cambios";
+  if (partida.estado !== "jugando") return "sin_cambios";
+
+  const state = deserializeMatchState(partida.match_state as SerializedMatchState);
+  if (state.finished) return "sin_cambios";
+
+  const segundosTranscurridos = (Date.now() - new Date(partida.creado_en).getTime()) / 1000;
+  const objetivo = minutoObjetivo(segundosTranscurridos);
+  const minutoInicial = state.minute;
+  while (state.minute < objetivo && !state.finished) {
+    tickMinute(state);
+  }
+  if (state.minute === minutoInicial && !state.finished) return "sin_cambios";
+
+  if (!state.finished) {
+    const { error: updateError } = await supabase
+      .from("partidas_online")
+      .update({ match_state: serializeMatchState(state), actualizado_en: new Date().toISOString() })
+      .eq("id", partida.id);
+    if (updateError) throw new Error(updateError.message);
+    return "avanzo";
+  }
+
+  const { error: cierrePartidaError } = await supabase
+    .from("partidas_online")
+    .update({ match_state: serializeMatchState(state), estado: "terminado", actualizado_en: new Date().toISOString() })
+    .eq("id", partida.id);
+  if (cierrePartidaError) throw new Error(cierrePartidaError.message);
+
+  const empatado = state.teams[0].goals === state.teams[1].goals;
+  const penalties =
+    formato === "eliminacion_directa" && empatado
+      ? simulatePenaltyShootout([state.teams[0], state.teams[1]]).result
+      : undefined;
+
+  await escribirResultadoTorneoPartido({
+    data: {
+      torneo_partido_id: torneoPartidoId,
+      resultado: {
+        homeGoals: state.teams[0].goals,
+        awayGoals: state.teams[1].goals,
+        stats: { players: state.playerStats },
+        events: state.events,
+        ...(penalties ? { penalties } : {}),
+      },
+    },
+  });
+  return "termino";
+}
+
+/**
  * Busca partidos "en_curso" cuya partidas_online todavía dice "jugando",
  * los pone al día según el ritmo real (tournament-pacing.ts), y si
  * terminan, escribe el resultado final (con penales si corresponde) y
@@ -143,61 +216,10 @@ async function avanzarPartidosEnCurso(): Promise<{ avanzados: number; terminados
 
   for (const row of filasRaw as Array<TorneoPartidoRow & { torneos: { formato: string } }>) {
     try {
-      const { data: partida, error: partidaError } = await supabase
-        .from("partidas_online")
-        .select("id, estado, match_state, creado_en")
-        .eq("id", row.partida_online_id)
-        .maybeSingle();
-      if (partidaError) throw new Error(partidaError.message);
-      if (!partida || !partida.match_state) continue;
-      if (partida.estado !== "jugando") continue;
-
-      const state = deserializeMatchState(partida.match_state as SerializedMatchState);
-      if (state.finished) continue;
-
-      const segundosTranscurridos = (Date.now() - new Date(partida.creado_en).getTime()) / 1000;
-      const objetivo = minutoObjetivo(segundosTranscurridos);
-      while (state.minute < objetivo && !state.finished) {
-        tickMinute(state);
-      }
-      avanzados++;
-      torneoIdsAfectados.add(row.torneo_id);
-
-      if (!state.finished) {
-        const { error: updateError } = await supabase
-          .from("partidas_online")
-          .update({ match_state: serializeMatchState(state), actualizado_en: new Date().toISOString() })
-          .eq("id", partida.id);
-        if (updateError) throw new Error(updateError.message);
-        continue;
-      }
-
-      // Partido terminado en esta pasada: cerrar y escribir el resultado del torneo.
-      const { error: cierrePartidaError } = await supabase
-        .from("partidas_online")
-        .update({ match_state: serializeMatchState(state), estado: "terminado", actualizado_en: new Date().toISOString() })
-        .eq("id", partida.id);
-      if (cierrePartidaError) throw new Error(cierrePartidaError.message);
-
-      const empatado = state.teams[0].goals === state.teams[1].goals;
-      const penalties =
-        row.torneos.formato === "eliminacion_directa" && empatado
-          ? simulatePenaltyShootout([state.teams[0], state.teams[1]]).result
-          : undefined;
-
-      await escribirResultadoTorneoPartido({
-        data: {
-          torneo_partido_id: row.id,
-          resultado: {
-            homeGoals: state.teams[0].goals,
-            awayGoals: state.teams[1].goals,
-            stats: { players: state.playerStats },
-            events: state.events,
-            ...(penalties ? { penalties } : {}),
-          },
-        },
-      });
-      terminados++;
+      const resultado = await ponerAlDiaPartidoTorneo(row.id, row.partida_online_id!, row.torneos.formato);
+      if (resultado === "avanzo") avanzados++;
+      if (resultado === "termino") { avanzados++; terminados++; }
+      if (resultado !== "sin_cambios") torneoIdsAfectados.add(row.torneo_id);
     } catch (e) {
       errores.push(`Avance partido ${row.id}: ${e instanceof Error ? e.message : String(e)}`);
     }
