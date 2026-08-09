@@ -50,6 +50,8 @@ export function TournamentSetupScreen() {
   const [colorEquipo, setColorEquipo] = useState(COLORS[0].value);
   const [squadEquipo, setSquadEquipo] = useState<Player[]>(() => generateSquad(20));
   const [agregando, setAgregando] = useState(false);
+  /** Solo se usa en torneos locales — en online el tipo se decide solo (ver handleAgregarEquipo). */
+  const [tipoEquipoLocal, setTipoEquipoLocal] = useState<"jugador" | "bot">("jugador");
 
   // ── Retomar un torneo "armado" ya existente (antes esto creaba un
   // torneo nuevo duplicado en vez de retomar el que ya estaba armado) ──
@@ -121,8 +123,20 @@ export function TournamentSetupScreen() {
     setAgregando(true);
     setError(null);
     try {
+      // En torneos online: el primer equipo que agrega el admin es el suyo
+      // propio; cualquier equipo agregado después pasa a ser un bot (con
+      // nombre/color/plantel elegidos a mano, no al azar). En torneos
+      // locales no aplica esta regla — todos los agregados acá son "humanos"
+      // como siempre, porque se asume un solo dispositivo pasando de mano en
+      // mano.
+      // Online: el primero que agrega el admin es su propio equipo, el resto
+      // pasa a ser bot automáticamente. Local: lo elige a mano con el toggle
+      // Jugador/Bot, ya que ahí una sola persona suele armar varios equipos.
+      const yaTieneEquipoPropio = slots.some((s) => s.ownerUserId === user?.id);
+      const esBotNuevo = esOnline ? yaTieneEquipoPropio : tipoEquipoLocal === "bot";
+
       const team = makeTeamFromSquad(
-        { name: nombreEquipo.trim(), color: colorEquipo, isBot: false },
+        { name: nombreEquipo.trim(), color: colorEquipo, isBot: esBotNuevo },
         squadEquipo,
       );
       await agregarSlot({
@@ -135,7 +149,7 @@ export function TournamentSetupScreen() {
         lineHeight: team.lineHeight,
         buildUp: team.buildUp,
         pressIntensity: team.pressIntensity,
-        ownerUserId: user?.id,
+        ownerUserId: esBotNuevo ? undefined : user?.id,
         seed: slots.length,
       });
       const actualizados = await fetchSlots(tournamentId);
@@ -425,6 +439,34 @@ export function TournamentSetupScreen() {
 
         <div className="card p-4 mt-4">
           <h3 className="font-display font-bold text-lg">Agregar equipo</h3>
+          {esOnline && slots.some((s) => s.ownerUserId === user?.id) && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Ya tenés tu equipo anotado — el que agregues ahora va a quedar como equipo bot del torneo.
+            </p>
+          )}
+          {!esOnline && (
+            <div className="mt-3">
+              <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
+                Este equipo es de...
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className={`chip py-2 ${tipoEquipoLocal === "jugador" ? "chip-active" : ""}`}
+                  onClick={() => setTipoEquipoLocal("jugador")}
+                >
+                  Un jugador
+                </button>
+                <button
+                  type="button"
+                  className={`chip py-2 ${tipoEquipoLocal === "bot" ? "chip-active" : ""}`}
+                  onClick={() => setTipoEquipoLocal("bot")}
+                >
+                  La CPU (bot)
+                </button>
+              </div>
+            </div>
+          )}
           <label className="block mt-3 text-xs uppercase tracking-wider text-muted-foreground">
             Nombre del equipo
           </label>

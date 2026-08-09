@@ -18,6 +18,7 @@ export type Screen =
   | "tournament_setup"
   | "tournament_hub"
   | "tournament_locker"
+  | "tournament_match_live"
   | "tournament_standings"
   | "tournament_bracket"
   | "tournament_match_summary"
@@ -100,6 +101,9 @@ interface GameCtx {
   /** Resultado de la tanda de penales del último partido, si hubo — para mostrarlo en StatsScreen. */
   tournamentPenaltyResult: { homeGoals: number; awayGoals: number } | null;
   setTournamentPenaltyResult: (r: { homeGoals: number; awayGoals: number } | null) => void;
+  /** Id de torneo_partidos que se está mirando/jugando en tiempo real (sala de espera + partido en vivo online). */
+  tournamentLiveMatchId: string | null;
+  setTournamentLiveMatchId: (id: string | null) => void;
   settings: MatchSettings;
   setSettings: (s: MatchSettings) => void;
   activeLockerTeam: 0 | 1;
@@ -125,6 +129,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [tournamentActiveMatchId, setTournamentActiveMatchId] = useState<string | null>(null);
   const [tournamentActiveMatchIsKnockout, setTournamentActiveMatchIsKnockout] = useState(false);
   const [tournamentPenaltyResult, setTournamentPenaltyResult] = useState<{ homeGoals: number; awayGoals: number } | null>(null);
+  const [tournamentLiveMatchId, setTournamentLiveMatchId] = useState<string | null>(null);
 
   const value = useMemo<GameCtx>(() => ({
     screen, setScreen,
@@ -137,6 +142,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     tournamentActiveMatchId, setTournamentActiveMatchId,
     tournamentActiveMatchIsKnockout, setTournamentActiveMatchIsKnockout,
     tournamentPenaltyResult, setTournamentPenaltyResult,
+    tournamentLiveMatchId, setTournamentLiveMatchId,
     reset: () => {
       setTeams([null, null]);
       setActiveLockerTeam(0);
@@ -146,9 +152,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setTournamentActiveMatchId(null);
       setTournamentActiveMatchIsKnockout(false);
       setTournamentPenaltyResult(null);
+      setTournamentLiveMatchId(null);
       setScreen("home");
     },
-  }), [screen, teams, settings, activeLockerTeam, testMode, lastMatchStats, tournamentId, tournamentActiveMatchId, tournamentActiveMatchIsKnockout, tournamentPenaltyResult]);
+  }), [screen, teams, settings, activeLockerTeam, testMode, lastMatchStats, tournamentId, tournamentActiveMatchId, tournamentActiveMatchIsKnockout, tournamentPenaltyResult, tournamentLiveMatchId]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -404,6 +404,44 @@ export async function generarFixtureYArrancar(torneoId: string): Promise<void> {
   if (updateError) throw new Error(updateError.message);
 }
 
+/** Trae un único partido de torneo por su id — para pantallas que solo necesitan seguir uno. */
+export async function fetchTorneoPartido(torneoPartidoId: string): Promise<TournamentFixtureMatch> {
+  const { data, error } = await supabase
+    .from("torneo_partidos")
+    .select("*")
+    .eq("id", torneoPartidoId)
+    .single();
+  if (error) throw new Error(error.message);
+  return rowToFixtureMatch(data as TorneoPartidoRow);
+}
+
+/**
+ * Asigna o cambia el horario de un partido de torneo online en modo manual.
+ * Protegido por RLS: solo un admin del torneo puede hacerlo, y solo si el
+ * partido todavía está pendiente (ver migración
+ * 20260808213000_torneo_partidos_update_horario_admin.sql).
+ */
+export async function asignarHoraPartido(torneoPartidoId: string, fechaHoraISO: string): Promise<void> {
+  const { error } = await supabase
+    .from("torneo_partidos")
+    .update({ hora_programada: fechaHoraISO })
+    .eq("id", torneoPartidoId);
+  if (error) throw new Error(error.message);
+}
+
+/** Verifica si el usuario actual es admin del torneo dado. */
+export async function esAdminDeTorneo(torneoId: string): Promise<boolean> {
+  const usuarioId = await ensureAuthUid();
+  const { data, error } = await supabase
+    .from("torneo_admins")
+    .select("usuario_id")
+    .eq("torneo_id", torneoId)
+    .eq("usuario_id", usuarioId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return !!data;
+}
+
 export async function fetchFixture(torneoId: string): Promise<TournamentFixtureMatch[]> {
   const { data, error } = await supabase
     .from("torneo_partidos")

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useGame } from "@/lib/football/store";
 import { useAuth } from "@/hooks/use-auth";
-import { fetchTorneo, fetchSlots, fetchFixture, teamFromSlot, avanzarRondaSiCorresponde, finalizarLigaSiCorresponde } from "@/lib/football/tournament-api";
+import { fetchTorneo, fetchSlots, fetchFixture, teamFromSlot, avanzarRondaSiCorresponde, finalizarLigaSiCorresponde, asignarHoraPartido, esAdminDeTorneo } from "@/lib/football/tournament-api";
 import { resolverPartidoAutomatico } from "@/lib/football/tournament-bot-resolve";
 import { computeStandings } from "@/lib/football/tournament-standings";
 import type { Tournament, TournamentSlot, TournamentFixtureMatch } from "@/lib/football/tournament-types";
@@ -10,6 +10,7 @@ export function TournamentHubScreen() {
   const {
     tournamentId, reset, setScreen, setSettings, setTeams,
     setActiveLockerTeam, setTournamentActiveMatchId, setTournamentActiveMatchIsKnockout,
+    setTournamentLiveMatchId,
   } = useGame();
   const { user } = useAuth();
 
@@ -19,6 +20,9 @@ export function TournamentHubScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [resolviendoId, setResolviendoId] = useState<string | null>(null);
+  const [soyAdminTorneo, setSoyAdminTorneo] = useState(false);
+  const [horarioElegido, setHorarioElegido] = useState("");
+  const [guardandoHorario, setGuardandoHorario] = useState(false);
 
   useEffect(() => {
     if (!tournamentId) return;
@@ -47,6 +51,11 @@ export function TournamentHubScreen() {
         setSlots(s);
         setFixture(f);
         setError(null);
+        if (t.isOnline) {
+          esAdminDeTorneo(tournamentId!)
+            .then((esAdmin) => { if (!cancelado) setSoyAdminTorneo(esAdmin); })
+            .catch(() => { if (!cancelado) setSoyAdminTorneo(false); });
+        }
       } catch (e) {
         if (!cancelado) setError(e instanceof Error ? e.message : "No se pudo cargar el torneo.");
       } finally {
@@ -97,6 +106,22 @@ export function TournamentHubScreen() {
     setTournamentActiveMatchId(m.id);
     setTournamentActiveMatchIsKnockout(tournament.format === "eliminacion_directa");
     setScreen("handoff");
+  }
+
+  async function guardarHorario(m: TournamentFixtureMatch) {
+    if (!horarioElegido || !tournamentId) return;
+    setGuardandoHorario(true);
+    setError(null);
+    try {
+      await asignarHoraPartido(m.id, new Date(horarioElegido).toISOString());
+      const f = await fetchFixture(tournamentId);
+      setFixture(f);
+      setHorarioElegido("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar el horario.");
+    } finally {
+      setGuardandoHorario(false);
+    }
   }
 
   async function resolverAutomatico(m: TournamentFixtureMatch) {
@@ -169,7 +194,34 @@ export function TournamentHubScreen() {
                 </div>
                 <div className="text-xs text-muted-foreground">Ronda {proximo.round}</div>
               </div>
-              {esBot(proximo.homeSlotId) && esBot(proximo.awaySlotId) ? (
+              {tournament.isOnline && !proximo.scheduledAt && soyAdminTorneo ? (
+                <div className="flex flex-col items-end gap-1">
+                  <input
+                    type="datetime-local"
+                    className="input text-xs"
+                    value={horarioElegido}
+                    onChange={(e) => setHorarioElegido(e.target.value)}
+                  />
+                  <button
+                    className="btn-primary text-xs disabled:opacity-50"
+                    disabled={!horarioElegido || guardandoHorario}
+                    onClick={() => guardarHorario(proximo)}
+                  >
+                    {guardandoHorario ? "Guardando..." : "Confirmar horario"}
+                  </button>
+                </div>
+              ) : tournament.isOnline && !proximo.scheduledAt ? (
+                <span className="text-xs text-muted-foreground text-right max-w-[10rem]">
+                  Esperando que un admin asigne el horario.
+                </span>
+              ) : tournament.isOnline ? (
+                <button
+                  className="btn-primary"
+                  onClick={() => { setTournamentLiveMatchId(proximo.id); setScreen("tournament_match_live"); }}
+                >
+                  Ver partido →
+                </button>
+              ) : esBot(proximo.homeSlotId) && esBot(proximo.awaySlotId) ? (
                 <button
                   className="btn-secondary disabled:opacity-50"
                   disabled={resolviendoId === proximo.id}
