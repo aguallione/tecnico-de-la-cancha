@@ -20,9 +20,10 @@ export function TournamentHubScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [resolviendoId, setResolviendoId] = useState<string | null>(null);
-  const [soyAdminTorneo, setSoyAdminTorneo] = useState(false);
   const [horarioElegido, setHorarioElegido] = useState("");
   const [guardandoHorario, setGuardandoHorario] = useState(false);
+  const [soyAdminTorneo, setSoyAdminTorneo] = useState(false);
+
 
   useEffect(() => {
     if (!tournamentId) return;
@@ -85,14 +86,35 @@ export function TournamentHubScreen() {
     );
   }
 
+  function formatHorario(fechaISO: string | undefined): string {
+    if (!fechaISO) return "Sin horario asignado";
+    const d = new Date(fechaISO);
+    return d.toLocaleString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
   const nombreSlot = (id: string) => slots.find((s) => s.id === id)?.displayName ?? "?";
   const esBot = (id: string) => slots.find((s) => s.id === id)?.teamConfig.isBot ?? false;
   const esLiga = tournament.format !== "eliminacion_directa";
   const standings = esLiga ? computeStandings(slots, fixture) : [];
 
+  const miSlotId = slots.find((s) => s.ownerUserId === user?.id)?.id;
   const pendientes = fixture
     .filter((m) => m.status === "pendiente")
-    .sort((a, b) => a.round - b.round);
+    .sort((a, b) => {
+      // Priorizar partidos donde el usuario es partícipe
+      const aEsMio = a.homeSlotId === miSlotId || a.awaySlotId === miSlotId;
+      const bEsMio = b.homeSlotId === miSlotId || b.awaySlotId === miSlotId;
+      if (aEsMio && !bEsMio) return -1;
+      if (!aEsMio && bEsMio) return 1;
+      // Si ambos son míos o ninguno, ordenar por ronda
+      return a.round - b.round;
+    });
   const proximo = pendientes[0] ?? null;
   const jugados = fixture.filter((m) => m.status === "jugado");
 
@@ -187,52 +209,83 @@ export function TournamentHubScreen() {
         <div className="card p-4 mt-6">
           <h2 className="font-display text-lg font-bold">Próximo partido</h2>
           {proximo ? (
-            <div className="mt-3 flex items-center justify-between gap-3">
-              <div className="text-sm">
-                <div className="font-medium">
-                  {nombreSlot(proximo.homeSlotId)} vs {nombreSlot(proximo.awaySlotId)}
+            <div className="mt-3 space-y-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <div className="font-medium">
+                    {nombreSlot(proximo.homeSlotId)} vs {nombreSlot(proximo.awaySlotId)}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Ronda {proximo.round}
+                    {tournament.isOnline && proximo.scheduledAt && (
+                      <span className="ml-2">· {formatHorario(proximo.scheduledAt)}</span>
+                    )}
+                  </div>
                 </div>
-                <div className="text-xs text-muted-foreground">Ronda {proximo.round}</div>
+                {!tournament.isOnline && (
+                  <>
+                    {esBot(proximo.homeSlotId) && esBot(proximo.awaySlotId) ? (
+                      <button
+                        className="btn-secondary disabled:opacity-50"
+                        disabled={resolviendoId === proximo.id}
+                        onClick={() => resolverAutomatico(proximo)}
+                      >
+                        {resolviendoId === proximo.id ? "Resolviendo..." : "Resolver automático"}
+                      </button>
+                    ) : (
+                      <button className="btn-primary" onClick={() => jugarPartido(proximo)}>
+                        Jugar →
+                      </button>
+                    )}
+                  </>
+                )}
+                {tournament.isOnline && (
+                  <>
+                    {proximo.scheduledAt && (
+                      <button
+                        className="btn-primary"
+                        onClick={() => { setTournamentLiveMatchId(proximo.id); setScreen("tournament_match_live"); }}
+                      >
+                        Ver partido →
+                      </button>
+                    )}
+                    {!proximo.scheduledAt && soyAdminTorneo && tournament.modoHorario === "manual" && (
+                      <div className="flex flex-col items-end gap-1 w-full sm:w-auto">
+                        <input
+                          type="datetime-local"
+                          className="input text-xs w-full"
+                          value={horarioElegido}
+                          onChange={(e) => setHorarioElegido(e.target.value)}
+                          min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+                        />
+                        <button
+                          className="btn-primary text-xs disabled:opacity-50 w-full"
+                          disabled={!horarioElegido || guardandoHorario}
+                          onClick={() => guardarHorario(proximo)}
+                        >
+                          {guardandoHorario ? "Guardando..." : "Asignar horario"}
+                        </button>
+                      </div>
+                    )}
+                    {!proximo.scheduledAt && soyAdminTorneo && tournament.modoHorario !== "manual" && (
+                      <span className="text-xs text-muted-foreground">
+                        El torneo usa horario automático. El sistema asignará la hora.
+                      </span>
+                    )}
+                    {!proximo.scheduledAt && !soyAdminTorneo && (
+                      <span className="text-xs text-muted-foreground">Esperando que un admin asigne el horario.</span>
+                    )}
+                  </>
+                )}
               </div>
-              {tournament.isOnline && !proximo.scheduledAt && soyAdminTorneo ? (
-                <div className="flex flex-col items-end gap-1">
-                  <input
-                    type="datetime-local"
-                    className="input text-xs"
-                    value={horarioElegido}
-                    onChange={(e) => setHorarioElegido(e.target.value)}
-                  />
-                  <button
-                    className="btn-primary text-xs disabled:opacity-50"
-                    disabled={!horarioElegido || guardandoHorario}
-                    onClick={() => guardarHorario(proximo)}
-                  >
-                    {guardandoHorario ? "Guardando..." : "Confirmar horario"}
-                  </button>
+              {tournament.isOnline && proximo.scheduledAt && (
+                <div className="text-xs text-muted-foreground border-t border-border pt-2 mt-1">
+                  {new Date(proximo.scheduledAt) > new Date() ? (
+                    `El partido comenzará en ${Math.round((new Date(proximo.scheduledAt).getTime() - Date.now()) / 60000)} minutos.`
+                  ) : (
+                    "El partido debería estar en curso o ya terminó."
+                  )}
                 </div>
-              ) : tournament.isOnline && !proximo.scheduledAt ? (
-                <span className="text-xs text-muted-foreground text-right max-w-[10rem]">
-                  Esperando que un admin asigne el horario.
-                </span>
-              ) : tournament.isOnline ? (
-                <button
-                  className="btn-primary"
-                  onClick={() => { setTournamentLiveMatchId(proximo.id); setScreen("tournament_match_live"); }}
-                >
-                  Ver partido →
-                </button>
-              ) : esBot(proximo.homeSlotId) && esBot(proximo.awaySlotId) ? (
-                <button
-                  className="btn-secondary disabled:opacity-50"
-                  disabled={resolviendoId === proximo.id}
-                  onClick={() => resolverAutomatico(proximo)}
-                >
-                  {resolviendoId === proximo.id ? "Resolviendo..." : "Resolver automático"}
-                </button>
-              ) : (
-                <button className="btn-primary" onClick={() => jugarPartido(proximo)}>
-                  Jugar →
-                </button>
               )}
             </div>
           ) : tournament.status === "finalizado" ? (

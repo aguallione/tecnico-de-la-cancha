@@ -73,6 +73,7 @@ src/
       TournamentJoinScreen.tsx
       TournamentListScreen.tsx
       TournamentLockerScreen.tsx
+      TournamentMatchScreen.tsx
       TournamentSetupScreen.tsx
     online/
       OnlineEquipoSelector.tsx
@@ -193,6 +194,8 @@ supabase/
     20260806210000_torneo_slots_insercion_online.sql
     20260807000000_torneo_slots_titulares_y_update_propio.sql
     20260808120000_torneos_ia_y_estado_en_curso.sql
+    20260808213000_torneo_partidos_update_horario_admin.sql
+    20260809204500_activar_cron_resolver_torneos.sql
 .gitignore
 .prettierignore
 .prettierrc
@@ -4980,6 +4983,26 @@ export const startInstance = createStart(() => ({
 }));
 </file>
 
+<file path="supabase/migrations/20260809204500_activar_cron_resolver_torneos.sql">
+create extension if not exists pg_cron with schema extensions;
+create extension if not exists pg_net with schema extensions;
+
+select cron.schedule(
+  'resolver-torneos-online',
+  '* * * * *',
+  $$
+  select net.http_post(
+    url := 'https://tecnico-de-la-cancha.vercel.app/api/resolver-torneos',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-resolver-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'torneo_resolver_secret')
+    ),
+    body := '{}'::jsonb
+  );
+  $$
+);
+</file>
+
 <file path=".prettierignore">
 node_modules
 dist
@@ -6947,6 +6970,406 @@ function PitchLines() {
 }
 </file>
 
+<file path="src/components/football/TournamentMatchScreen.tsx">
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useGame } from "@/lib/football/store";
+import { fetchTorneoPartido, fetchTorneo } from "@/lib/football/tournament-api";
+import { fetchPartida } from "@/lib/online/api";
+import { avanzarPartidoTorneoEnVivo } from "@/lib/football/tournament-live-server-fns";
+import { deserializeMatchState } from "@/lib/football/serialization";
+import { possessionPct } from "@/lib/football/engine";
+import type { TournamentFixtureMatch } from "@/lib/football/tournament-types";
+import type { PartidaOnline } from "@/lib/online/types";
+
+const MENSAJES_ESPERA = [
+  "Los jugadores están entrando en calor.",
+  "El árbitro revisa la cancha antes del pitazo inicial.",
+  "Todavía estás a tiempo de hacer un último cambio táctico.",
+  "El DT rival ya confirmó su alineación.",
+  "Se siente la previa en el vestuario...",
+  "__FALTAN_X__",
+  "Los equipos terminan de ajustar los últimos detalles.",
+  "El cuerpo técnico prepara las últimas indicaciones.",
+  "Últimos minutos antes de que ruede la pelota.",
+  "El árbitro y sus asistentes ultiman los preparativos.",
+  "Las tribunas comienzan a llenarse.",
+  "La tensión crece a medida que se acerca el comienzo.",
+  "Los jugadores esperan la señal para salir.",
+  "Últimos ajustes en la formación.",
+  "El DT revisa por última vez el planteamiento.",
+  "Se repasan las instrucciones tácticas antes de salir.",
+  "La previa llega a sus últimos instantes.",
+  "Los protagonistas están a punto de salir.",
+  "El equipo rival termina su calentamiento.",
+  "Se ultiman los detalles del espectáculo.",
+  "La pelota espera por sus protagonistas.",
+  "El ambiente se empieza a encender.",
+  "Cada minuto que pasa nos acerca al pitazo inicial.",
+  "Los últimos minutos de espera pueden cambiarlo todo.",
+  "El cuarto árbitro verifica que todo esté en orden.",
+  "Los equipos reciben la última autorización para salir.",
+  "En cualquier momento, comienza el espectáculo.",
+  "Los últimos ajustes pueden marcar la diferencia.",
+  "Noventa minutos para demostrar el trabajo de toda la semana.",
+  "El planteamiento está listo para ponerse a prueba.",
+  "Los jugadores esperan las últimas órdenes del cuerpo técnico.",
+  "Un último vistazo a la táctica antes de salir.",
+  "El rival ya está preparado. ¿Tu equipo también?",
+  "La concentración es máxima en ambos vestuarios.",
+  "Todo lo trabajado está a punto de ponerse a prueba.",
+  "El partido se gana en la cancha, pero la preparación empieza antes.",
+  "La pelota todavía no rueda, pero el partido ya se empieza a jugar.",
+  "La espera está por terminar. La decisión queda en manos de los protagonistas.",
+];
+
+const POLL_MS = 5000;
+const ROTACION_MS = 5000;
+
+/** Baraja un array (Fisher-Yates), sin mutar el original. */
+function barajar<T>(arr: T[]): T[] {
+  const copia = [...arr];
+  for (let i = copia.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copia[i], copia[j]] = [copia[j], copia[i]];
+  }
+  return copia;
+}
+
+function formatearMensaje(mensaje: string, minutosRestantes: number): string {
+  if (mensaje === "__FALTAN_X__") {
+    const min = Math.max(0, Math.round(minutosRestantes));
+    return `Faltan ${min} minuto${min === 1 ? "" : "s"} para el pitazo inicial.`;
+  }
+  return mensaje;
+}
+
+export function TournamentMatchScreen() {
+  const { tournamentLiveMatchId, tournamentId, setScreen } = useGame();
+
+  const [match, setMatch] = useState<TournamentFixtureMatch | null>(null);
+  const [formato, setFormato] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+  const [transicionando, setTransicionando] = useState(false);
+
+  // ── Bolsa sin repetición para los mensajes rotativos ──────────────────────
+  const bolsaRef = useRef<string[]>(barajar(MENSAJES_ESPERA));
+  const [indiceMensaje, setIndiceMensaje] = useState(0);
+  const [mensajeVisible, setMensajeVisible] = useState(true);
+
+  // Formato del torneo (necesario para saber si un empate al terminar el
+  // partido va a penales) — se trae una sola vez, es un dato que no cambia.
+  useEffect(() => {
+    if (!tournamentId) return;
+    fetchTorneo(tournamentId)
+      .then((t) => setFormato(t.format))
+      .catch(() => {});
+  }, [tournamentId]);
+
+  // ── Polling del estado del partido ─────────────────────────────────────────
+  useEffect(() => {
+    if (!tournamentLiveMatchId) return;
+    let cancelado = false;
+
+    async function consultar() {
+      try {
+        const m = await fetchTorneoPartido(tournamentLiveMatchId!);
+        if (cancelado) return;
+        setMatch((anterior) => {
+          if (anterior && anterior.status === "pendiente" && m.status === "en_curso") {
+            setTransicionando(true);
+            if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+              new Notification("¡Arrancó tu partido de torneo!");
+            }
+            setTimeout(() => setTransicionando(false), 2000);
+          }
+          return m;
+        });
+        setError(null);
+      } catch (e) {
+        if (!cancelado) setError(e instanceof Error ? e.message : "No se pudo cargar el partido.");
+      }
+    }
+
+    consultar();
+    const id = setInterval(consultar, POLL_MS);
+    return () => { cancelado = true; clearInterval(id); };
+  }, [tournamentLiveMatchId]);
+
+  useEffect(() => {
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, []);
+
+  // ── Rotación de mensajes (bolsa sin repetición) ────────────────────────────
+  useEffect(() => {
+    if (!match || match.status !== "pendiente") return;
+    const id = setInterval(() => {
+      setMensajeVisible(false);
+      setTimeout(() => {
+        setIndiceMensaje((i) => {
+          const siguiente = i + 1;
+          if (siguiente >= bolsaRef.current.length) {
+            bolsaRef.current = barajar(MENSAJES_ESPERA);
+            return 0;
+          }
+          return siguiente;
+        });
+        setMensajeVisible(true);
+      }, 400);
+    }, ROTACION_MS);
+    return () => clearInterval(id);
+  }, [match?.status]);
+
+  const minutosRestantes = useMemo(() => {
+    if (!match?.scheduledAt) return 0;
+    const diffMs = new Date(match.scheduledAt).getTime() - Date.now();
+    return diffMs / 60000;
+  }, [match?.scheduledAt]);
+
+  if (!tournamentLiveMatchId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+        <div className="text-center">
+          <p>No hay ningún partido en seguimiento.</p>
+          <button className="btn-primary mt-4" onClick={() => setScreen("tournament_hub")}>← Volver al torneo</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4">
+        <div className="text-center">
+          <p className="text-sm text-destructive-foreground bg-destructive rounded px-3 py-2">{error}</p>
+          <button className="btn-primary mt-4" onClick={() => setScreen("tournament_hub")}>← Volver al torneo</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!match) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+        <p className="text-muted-foreground">Cargando partido...</p>
+      </div>
+    );
+  }
+
+  if (match.status === "jugado" || match.status === "walkover") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4">
+        <div className="text-center">
+          <p>Este partido ya terminó.</p>
+          <button className="btn-primary mt-4" onClick={() => setScreen("tournament_hub")}>
+            Ver resultado en el torneo →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (transicionando) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-pitch text-pitch-foreground">
+        <div className="text-center animate-pulse">
+          <div className="text-4xl">⚽</div>
+          <p className="font-display text-2xl font-black mt-3">¡Arrancó el partido!</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (match.status === "en_curso") {
+    if (!match.partidaOnlineId || !formato) {
+      // Ventana chica entre que el vigilante marca "en_curso" y crea la
+      // partidas_online (o mientras todavía no llegó el fetch del formato) —
+      // se resuelve solo en el próximo poll (5s).
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+          <p className="text-muted-foreground">Preparando el partido...</p>
+        </div>
+      );
+    }
+    return (
+      <TournamentLiveMatchView
+        torneoPartidoId={match.id}
+        partidaOnlineId={match.partidaOnlineId}
+        formato={formato}
+        onVolver={() => setScreen("tournament_hub")}
+      />
+    );
+  }
+
+  // Sala de espera (status === "pendiente")
+  const mensajeActual = formatearMensaje(bolsaRef.current[indiceMensaje], minutosRestantes);
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-pitch text-pitch-foreground px-6">
+      <button
+        className="absolute top-4 left-4 text-xs text-pitch-foreground/70 hover:text-pitch-foreground"
+        onClick={() => setScreen("tournament_hub")}
+      >
+        ← Volver al torneo
+      </button>
+      <div className="text-xs uppercase tracking-[0.3em] text-lime-300/80">Sala de espera</div>
+      <div className="mt-3 font-display text-3xl font-black">
+        {match.scheduledAt
+          ? new Date(match.scheduledAt).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" })
+          : "Horario a confirmar"}
+      </div>
+      <div className="mt-10 h-16 flex items-center justify-center max-w-md text-center">
+        <p
+          className={`text-lime-100/90 transition-all duration-500 ${
+            mensajeVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2"
+          }`}
+        >
+          {mensajeActual}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+const POLL_PARTIDA_MS = 5000;
+
+/**
+ * Vista de partido de torneo online en vivo. A diferencia de
+ * OnlineMatchScreen, NO usa OnlineGameProvider (ese contexto asume un
+ * modelo de "jugadores uniéndose a una sala", que no aplica acá — cada
+ * lado ya es dueño de un torneo_slot desde antes). Lee partidas_online
+ * directo con fetchPartida, y dispara avanzarPartidoTorneoEnVivo cada
+ * pocos segundos para que el partido avance suave mientras alguien mira
+ * — es seguro llamarla más de una vez o desde varios espectadores a la
+ * vez, calcula el minuto objetivo por tiempo real transcurrido, no por
+ * cuántas veces se invoca. Sin controles de velocidad ni panel táctico
+ * todavía (eso queda para una pasada de pulido posterior) — por ahora es
+ * de solo mirar, ideal para cuando el dueño del equipo no está presente.
+ */
+function TournamentLiveMatchView({
+  torneoPartidoId,
+  partidaOnlineId,
+  formato,
+  onVolver,
+}: {
+  torneoPartidoId: string;
+  partidaOnlineId: string;
+  formato: string;
+  onVolver: () => void;
+}) {
+  const [partida, setPartida] = useState<PartidaOnline | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const disparandoRef = useRef(false);
+
+  useEffect(() => {
+    let cancelado = false;
+
+    async function consultar() {
+      try {
+        const p = await fetchPartida(partidaOnlineId);
+        if (cancelado || !p) return;
+        setPartida(p);
+        setError(null);
+
+        if (p.estado === "jugando" && !disparandoRef.current) {
+          disparandoRef.current = true;
+          avanzarPartidoTorneoEnVivo({
+            data: { torneo_partido_id: torneoPartidoId, partida_online_id: partidaOnlineId, formato },
+          })
+            .catch(() => {})
+            .finally(() => { disparandoRef.current = false; });
+        }
+      } catch (e) {
+        if (!cancelado) setError(e instanceof Error ? e.message : "No se pudo cargar el partido.");
+      }
+    }
+
+    consultar();
+    const id = setInterval(consultar, POLL_PARTIDA_MS);
+    return () => { cancelado = true; clearInterval(id); };
+  }, [partidaOnlineId, torneoPartidoId, formato]);
+
+  const state = useMemo(
+    () => (partida?.match_state ? deserializeMatchState(partida.match_state) : null),
+    [partida?.match_state],
+  );
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4">
+        <div className="text-center">
+          <p className="text-sm text-destructive-foreground bg-destructive rounded px-3 py-2">{error}</p>
+          <button className="btn-secondary mt-4" onClick={onVolver}>← Volver al torneo</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!partida || !state) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+        <p className="text-muted-foreground">Cargando partido...</p>
+      </div>
+    );
+  }
+
+  const [teamA, teamB] = state.teams;
+  const [posA, posB] = possessionPct(state);
+  const displayMinute = state.minute > 90 ? `90+${state.minute - 90}` : `${state.minute}`;
+
+  return (
+    <div className="min-h-screen bg-background text-foreground pb-16">
+      <div className="sticky top-0 z-20 bg-pitch text-pitch-foreground shadow-md">
+        <div className="max-w-3xl mx-auto px-4 py-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+          <div className="text-right min-w-0">
+            <div className="font-display font-black text-sm sm:text-base truncate">{teamA.config.name}</div>
+            <div className="text-[10px] uppercase tracking-wider text-lime-200/70">
+              {teamA.formation} · {teamA.style}
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="font-display text-3xl sm:text-4xl font-black tabular-nums">
+              {teamA.goals} : {teamB.goals}
+            </div>
+            <div className="text-[11px] tracking-[0.2em] uppercase text-lime-200/80 mt-0.5">
+              {state.finished ? "Final" : `${displayMinute}'`}
+            </div>
+          </div>
+          <div className="text-left min-w-0">
+            <div className="font-display font-black text-sm sm:text-base truncate">{teamB.config.name}</div>
+            <div className="text-[10px] uppercase tracking-wider text-lime-200/70">
+              {teamB.formation} · {teamB.style}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-3xl mx-auto px-4 mt-4">
+        <div className="card p-3 text-xs flex items-center justify-between">
+          <span>Posesión</span>
+          <span className="font-display tabular-nums">{posA}% · {posB}%</span>
+        </div>
+        {state.finished && (
+          <div className="card p-3 mt-3 text-center bg-primary/10 border border-primary/30">
+            <p className="text-sm">Este partido ya terminó.</p>
+            <button className="btn-primary mt-2" onClick={onVolver}>Volver al torneo →</button>
+          </div>
+        )}
+        <div className="mt-3 space-y-2">
+          {[...state.events].reverse().map((ev, i) => (
+            <div key={i} className="card p-3 text-sm">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{ev.minute}'</div>
+              <div className="mt-0.5">{ev.text}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+</file>
+
 <file path="src/components/online/OnlineEquipoSelector.tsx">
 'use client';
 /**
@@ -8119,32 +8542,31 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 </file>
 
 <file path="src/routes/api/resolver-torneos.ts">
-import { createFileRoute } from "@tanstack/react-router";
+import { createAPIFileRoute } from "@tanstack/react-start/api";
 import { resolverPartidosVencidos } from "@/lib/football/tournament-cron";
 
-export const Route = createFileRoute("/api/resolver-torneos")({
-  server: {
-    handlers: {
-      POST: async ({ request }) => {
-        const secreto = request.headers.get("x-resolver-secret");
-        if (!secreto || secreto !== process.env.TORNEO_RESOLVER_SECRET) {
-          return new Response(JSON.stringify({ error: "No autorizado." }), {
-            status: 401,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
+export const APIRoute = createAPIFileRoute("/api/resolver-torneos")({
+  POST: async ({ request }) => {
+    const secreto = request.headers.get("x-resolver-secret");
+    if (!secreto || secreto !== process.env.TORNEO_RESOLVER_SECRET) {
+      return new Response(JSON.stringify({ error: "No autorizado." }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
-        try {
-          const resultado = await resolverPartidosVencidos();
-          return Response.json(resultado);
-        } catch (e) {
-          return new Response(
-            JSON.stringify({ error: e instanceof Error ? e.message : "Error desconocido." }),
-            { status: 500, headers: { "Content-Type": "application/json" } },
-          );
-        }
-      },
-    },
+    try {
+      const resultado = await resolverPartidosVencidos();
+      return new Response(JSON.stringify(resultado), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (e) {
+      return new Response(
+        JSON.stringify({ error: e instanceof Error ? e.message : "Error desconocido." }),
+        { status: 500, headers: { "Content-Type": "application/json" } },
+      );
+    }
   },
 });
 </file>
@@ -9148,6 +9570,28 @@ ALTER TABLE torneo_partidos
 ALTER TABLE torneo_partidos
   ADD CONSTRAINT torneo_partidos_estado_check
   CHECK (estado IN ('pendiente', 'en_curso', 'jugado', 'walkover'));
+</file>
+
+<file path="supabase/migrations/20260808213000_torneo_partidos_update_horario_admin.sql">
+create policy "torneo_partidos_update_horario_admin"
+  on torneo_partidos for update
+  to authenticated
+  using (
+    estado = 'pendiente'
+    and exists (
+      select 1 from torneo_admins a
+      where a.torneo_id = torneo_partidos.torneo_id
+        and a.usuario_id = auth.uid()
+    )
+  )
+  with check (
+    estado = 'pendiente'
+    and exists (
+      select 1 from torneo_admins a
+      where a.torneo_id = torneo_partidos.torneo_id
+        and a.usuario_id = auth.uid()
+    )
+  );
 </file>
 
 <file path=".gitignore">
@@ -11725,43 +12169,33 @@ function RootComponent() {
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ApiResolverTorneosRouteImport } from './routes/api/resolver-torneos'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiResolverTorneosRoute = ApiResolverTorneosRouteImport.update({
-  id: '/api/resolver-torneos',
-  path: '/api/resolver-torneos',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/api/resolver-torneos': typeof ApiResolverTorneosRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/api/resolver-torneos': typeof ApiResolverTorneosRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/api/resolver-torneos': typeof ApiResolverTorneosRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/resolver-torneos'
+  fullPaths: '/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/resolver-torneos'
-  id: '__root__' | '/' | '/api/resolver-torneos'
+  to: '/'
+  id: '__root__' | '/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ApiResolverTorneosRoute: typeof ApiResolverTorneosRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -11773,19 +12207,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/resolver-torneos': {
-      id: '/api/resolver-torneos'
-      path: '/api/resolver-torneos'
-      fullPath: '/api/resolver-torneos'
-      preLoaderRoute: typeof ApiResolverTorneosRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ApiResolverTorneosRoute: ApiResolverTorneosRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
@@ -11810,517 +12236,6 @@ actualización
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({});
-</file>
-
-<file path="src/components/football/TournamentSetupScreen.tsx">
-import { useEffect, useState } from "react";
-import { useGame } from "@/lib/football/store";
-import { generateSquad } from "@/lib/football/players";
-import { makeTeamFromSquad } from "@/lib/football/store";
-import { autoBotTeam } from "@/lib/football/bot";
-import { SquadOriginSelector } from "@/components/football/SquadOriginSelector";
-import { useAuth } from "@/hooks/use-auth";
-import type { Player } from "@/lib/football/types";
-import type { TournamentFormat, TournamentSlot } from "@/lib/football/tournament-types";
-import { crearTorneo, agregarSlot, fetchSlots, fetchTorneo, generarFixtureYArrancar } from "@/lib/football/tournament-api";
-
-const COLORS = [
-  { name: "Rojo", value: "#dc2626" },
-  { name: "Azul", value: "#2563eb" },
-  { name: "Amarillo", value: "#eab308" },
-  { name: "Verde", value: "#16a34a" },
-  { name: "Negro", value: "#111827" },
-  { name: "Blanco", value: "#f8fafc" },
-  { name: "Naranja", value: "#ea580c" },
-  { name: "Violeta", value: "#7c3aed" },
-];
-
-type Paso = "config" | "equipos";
-
-export function TournamentSetupScreen() {
-  const { setScreen, settings, tournamentId, setTournamentId } = useGame();
-  const { user } = useAuth();
-
-  const [paso, setPaso] = useState<Paso>("config");
-  const [nombre, setNombre] = useState("");
-  const [formato, setFormato] = useState<TournamentFormat>("liga_simple");
-  const [targetSlotCount, setTargetSlotCount] = useState(8);
-  const [creando, setCreando] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // ── Configuración online ──────────────────────────────────────────────
-  const [esOnline, setEsOnline] = useState(false);
-  const [modoHorario, setModoHorario] = useState<"manual" | "automatico_simultaneo" | "automatico_escalonado">("automatico_simultaneo");
-  const [intervaloHoras, setIntervaloHoras] = useState(72);
-  const [horarioAleatorio, setHorarioAleatorio] = useState(false);
-  const [rangoInicio, setRangoInicio] = useState("19:00");
-  const [rangoFin, setRangoFin] = useState("23:00");
-  const [codigoSalaCreado, setCodigoSalaCreado] = useState<string | null>(null);
-
-  const [slots, setSlots] = useState<TournamentSlot[]>([]);
-  const [arrancando, setArrancando] = useState(false);
-
-  // ── Formulario del equipo que se está agregando ──────────────────────────
-  const [nombreEquipo, setNombreEquipo] = useState("");
-  const [colorEquipo, setColorEquipo] = useState(COLORS[0].value);
-  const [squadEquipo, setSquadEquipo] = useState<Player[]>(() => generateSquad(20));
-  const [agregando, setAgregando] = useState(false);
-
-  // ── Retomar un torneo "armado" ya existente (antes esto creaba un
-  // torneo nuevo duplicado en vez de retomar el que ya estaba armado) ──
-  const [initialTournamentId] = useState(tournamentId);
-
-  useEffect(() => {
-    if (!initialTournamentId) return;
-    let cancelado = false;
-    (async () => {
-      try {
-        const torneo = await fetchTorneo(initialTournamentId);
-        const slotsExistentes = await fetchSlots(initialTournamentId);
-        if (cancelado) return;
-        setNombre(torneo.name);
-        setFormato(torneo.format);
-        setTargetSlotCount(torneo.targetSlotCount);
-        setEsOnline(torneo.isOnline);
-        if (torneo.modoHorario) setModoHorario(torneo.modoHorario);
-        setHorarioAleatorio(torneo.horarioAleatorio ?? false);
-        if (torneo.rangoHorarioInicio) setRangoInicio(torneo.rangoHorarioInicio);
-        if (torneo.rangoHorarioFin) setRangoFin(torneo.rangoHorarioFin);
-        if (torneo.intervaloHoras) setIntervaloHoras(torneo.intervaloHoras);
-        setCodigoSalaCreado(torneo.roomCode ?? null);
-        setSlots(slotsExistentes);
-        setPaso("equipos");
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "No se pudo cargar el torneo existente.");
-      }
-    })();
-    return () => {
-      cancelado = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function handleCrearTorneo() {
-    if (!nombre.trim()) return;
-    if (!user) {
-      setError("Necesitás iniciar sesión para crear un torneo.");
-      return;
-    }
-    setCreando(true);
-    setError(null);
-    try {
-      const torneo = await crearTorneo({
-        nombre: nombre.trim(),
-        formato,
-        targetSlotCount,
-        matchSettings: settings,
-        esOnline,
-        modoHorario: esOnline ? modoHorario : undefined,
-        horarioAleatorio: esOnline ? horarioAleatorio : undefined,
-        rangoHorarioInicio: esOnline && horarioAleatorio ? rangoInicio : undefined,
-        rangoHorarioFin: esOnline && horarioAleatorio ? rangoFin : undefined,
-        intervaloHoras: esOnline ? intervaloHoras : undefined,
-      });
-      setTournamentId(torneo.id);
-      setCodigoSalaCreado(torneo.roomCode ?? null);
-      setPaso("equipos");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo crear el torneo.");
-    } finally {
-      setCreando(false);
-    }
-  }
-
-  async function handleAgregarEquipo() {
-    if (!tournamentId || !nombreEquipo.trim()) return;
-    setAgregando(true);
-    setError(null);
-    try {
-      const team = makeTeamFromSquad(
-        { name: nombreEquipo.trim(), color: colorEquipo, isBot: false },
-        squadEquipo,
-      );
-      await agregarSlot({
-        torneoId: tournamentId,
-        displayName: team.config.name,
-        teamConfig: team.config,
-        squad: team.squad,
-        formation: team.formation,
-        style: team.style,
-        lineHeight: team.lineHeight,
-        buildUp: team.buildUp,
-        pressIntensity: team.pressIntensity,
-        ownerUserId: user?.id,
-        seed: slots.length,
-      });
-      const actualizados = await fetchSlots(tournamentId);
-      setSlots(actualizados);
-      setNombreEquipo("");
-      setColorEquipo(COLORS[(actualizados.length) % COLORS.length].value);
-      setSquadEquipo(generateSquad(20));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo agregar el equipo.");
-    } finally {
-      setAgregando(false);
-    }
-  }
-
-  async function handleCompletarConBots() {
-    if (!tournamentId) return;
-    setArrancando(true);
-    setError(null);
-    try {
-      let actuales = slots.length;
-      let seed = actuales;
-      while (actuales < targetSlotCount) {
-        const squad = generateSquad(20);
-        const team = makeTeamFromSquad(
-          { name: `Bot ${seed + 1}`, color: COLORS[seed % COLORS.length].value, isBot: true },
-          squad,
-        );
-        autoBotTeam(team);
-        await agregarSlot({
-          torneoId: tournamentId,
-          displayName: team.config.name,
-          teamConfig: team.config,
-          squad: team.squad,
-          formation: team.formation,
-          style: team.style,
-          lineHeight: team.lineHeight,
-          buildUp: team.buildUp,
-          pressIntensity: team.pressIntensity,
-          seed,
-        });
-        seed++;
-        actuales++;
-      }
-      const actualizados = await fetchSlots(tournamentId);
-      setSlots(actualizados);
-      await arrancarTorneo();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo completar con bots.");
-      setArrancando(false);
-    }
-  }
-
-  async function arrancarTorneo() {
-    if (!tournamentId) return;
-    setArrancando(true);
-    setError(null);
-    try {
-      await generarFixtureYArrancar(tournamentId);
-      setScreen("tournament_hub");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo arrancar el torneo.");
-      setArrancando(false);
-    }
-  }
-
-  // ── Paso 1: configuración base del torneo ────────────────────────────────
-
-  if (paso === "config") {
-    return (
-      <div className="min-h-screen bg-background text-foreground px-4 py-8">
-        <div className="max-w-lg mx-auto">
-          <button className="btn-ghost mb-4" onClick={() => setScreen("home")}>← Volver</button>
-          <h1 className="font-display text-3xl font-black">Nuevo torneo</h1>
-
-          <div className="card p-4 mt-6 space-y-4">
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
-                Nombre del torneo
-              </label>
-              <input
-                className="input w-full"
-                placeholder="Ej: Liga de Verano"
-                value={nombre}
-                onChange={(e) => setNombre(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
-                Formato
-              </label>
-              <div className="grid grid-cols-1 gap-2">
-                <button
-                  type="button"
-                  className={`chip py-2 ${formato === "liga_simple" ? "chip-active" : ""}`}
-                  onClick={() => setFormato("liga_simple")}
-                >
-                  Liga (todos contra todos, ida única)
-                </button>
-                <button
-                  type="button"
-                  className={`chip py-2 ${formato === "liga_ida_vuelta" ? "chip-active" : ""}`}
-                  onClick={() => setFormato("liga_ida_vuelta")}
-                >
-                  Liga (ida y vuelta)
-                </button>
-                <button
-                  type="button"
-                  className={`chip py-2 ${formato === "eliminacion_directa" ? "chip-active" : ""}`}
-                  onClick={() => setFormato("eliminacion_directa")}
-                >
-                  Copa (eliminación directa)
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
-                Cantidad de equipos
-              </label>
-              <input
-                type="number"
-                min={2}
-                max={16}
-                className="input w-24"
-                value={targetSlotCount}
-                onChange={(e) =>
-                  setTargetSlotCount(Math.max(2, Math.min(16, parseInt(e.target.value) || 2)))
-                }
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                Podés arrancar con menos equipos de los que anotes acá — al arrancar vas a poder
-                completar los cupos vacíos con bots, o jugar solo con los que se hayan anotado.
-                {formato === "eliminacion_directa" &&
-                  " Para Copa, si no llegás a una potencia de 2 (4, 8, 16), se completa con bots automáticamente."}
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
-                Modalidad
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <button type="button" className={`chip py-2 ${!esOnline ? "chip-active" : ""}`} onClick={() => setEsOnline(false)}>
-                  Local
-                </button>
-                <button type="button" className={`chip py-2 ${esOnline ? "chip-active" : ""}`} onClick={() => setEsOnline(true)}>
-                  Online
-                </button>
-              </div>
-            </div>
-
-            {esOnline && (
-              <div className="rounded-lg border border-border p-3 space-y-3">
-                <div>
-                  <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
-                    ¿Cómo se juegan los partidos?
-                  </label>
-                  <div className="grid grid-cols-1 gap-2">
-                    <button
-                      type="button"
-                      className={`chip py-2 text-left px-3 ${modoHorario === "automatico_simultaneo" ? "chip-active" : ""}`}
-                      onClick={() => setModoHorario("automatico_simultaneo")}
-                    >
-                      Automático: toda la ronda al mismo horario
-                    </button>
-                    <button
-                      type="button"
-                      className={`chip py-2 text-left px-3 ${modoHorario === "automatico_escalonado" ? "chip-active" : ""}`}
-                      onClick={() => setModoHorario("automatico_escalonado")}
-                    >
-                      Automático: un partido tras otro, cada tanto
-                    </button>
-                    <button
-                      type="button"
-                      className={`chip py-2 text-left px-3 ${modoHorario === "manual" ? "chip-active" : ""}`}
-                      onClick={() => setModoHorario("manual")}
-                    >
-                      Manual: yo elijo cada horario a mano
-                    </button>
-                  </div>
-                </div>
-
-                {modoHorario !== "manual" && (
-                  <>
-                    <div>
-                      <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
-                        {modoHorario === "automatico_simultaneo" ? "Horas entre ronda y ronda" : "Horas entre partido y partido"}
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        className="input w-24"
-                        value={intervaloHoras}
-                        onChange={(e) => setIntervaloHoras(Math.max(1, parseInt(e.target.value) || 1))}
-                      />
-                    </div>
-
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={horarioAleatorio}
-                        onChange={(e) => setHorarioAleatorio(e.target.checked)}
-                      />
-                      Elegir el horario al azar dentro de un rango, en vez de uno fijo
-                    </label>
-
-                    {horarioAleatorio && (
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">Desde</label>
-                          <input type="time" className="input w-full" value={rangoInicio} onChange={(e) => setRangoInicio(e.target.value)} />
-                        </div>
-                        <div>
-                          <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">Hasta</label>
-                          <input type="time" className="input w-full" value={rangoFin} onChange={(e) => setRangoFin(e.target.value)} />
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-
-                <p className="text-xs text-muted-foreground">
-                  Se va a generar un código de 6 letras al crear el torneo, para que otros se anoten con su equipo.
-                </p>
-              </div>
-            )}
-
-            {error && (
-              <p className="text-xs text-destructive-foreground bg-destructive rounded px-2 py-1">
-                {error}
-              </p>
-            )}
-
-            <button
-              className="btn-primary w-full disabled:opacity-50"
-              disabled={creando || !nombre.trim()}
-              onClick={handleCrearTorneo}
-            >
-              {creando ? "Creando..." : "Siguiente: agregar equipos →"}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Paso 2: agregar equipos ───────────────────────────────────────────────
-
-  const faltan = Math.max(0, targetSlotCount - slots.length);
-
-  return (
-    <div className="min-h-screen bg-background text-foreground px-4 py-8">
-      <div className="max-w-2xl mx-auto">
-        <h1 className="font-display text-3xl font-black">{nombre}</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          {slots.length} de {targetSlotCount} equipos anotados
-        </p>
-
-        {codigoSalaCreado && (
-          <div className="card p-4 mt-4 bg-primary/10 border border-primary/30 text-center">
-            <div className="text-xs uppercase tracking-wider text-muted-foreground">Código del torneo</div>
-            <div className="font-display text-3xl font-black tracking-[0.3em] mt-1">{codigoSalaCreado}</div>
-            <p className="text-xs text-muted-foreground mt-1">Compartilo para que otros se anoten con su equipo.</p>
-          </div>
-        )}
-
-        {slots.length > 0 && (
-          <div className="card p-4 mt-4">
-            <h3 className="font-display text-lg font-bold">Equipos anotados</h3>
-            <ul className="mt-2 space-y-1 text-sm">
-              {slots.map((s) => (
-                <li key={s.id} className="flex items-center gap-2">
-                  <span
-                    className="h-3 w-3 rounded-full inline-block"
-                    style={{ backgroundColor: s.teamConfig.color }}
-                  />
-                  {s.displayName}
-                  {s.teamConfig.isBot && (
-                    <span className="text-xs text-muted-foreground">(bot)</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <div className="card p-4 mt-4">
-          <h3 className="font-display font-bold text-lg">Agregar equipo</h3>
-          <label className="block mt-3 text-xs uppercase tracking-wider text-muted-foreground">
-            Nombre del equipo
-          </label>
-          <input
-            className="input mt-1 w-full"
-            value={nombreEquipo}
-            onChange={(e) => setNombreEquipo(e.target.value)}
-            placeholder="Ej: Los Titanes"
-          />
-          <label className="block mt-3 text-xs uppercase tracking-wider text-muted-foreground">
-            Color de camiseta
-          </label>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {COLORS.map((c) => (
-              <button
-                key={c.value}
-                type="button"
-                aria-label={c.name}
-                onClick={() => setColorEquipo(c.value)}
-                className={`h-8 w-8 rounded-full border-2 transition ${
-                  colorEquipo === c.value ? "border-primary scale-110" : "border-border"
-                }`}
-                style={{ backgroundColor: c.value }}
-              />
-            ))}
-          </div>
-          <SquadOriginSelector onSquadReady={setSquadEquipo} />
-
-          {error && (
-            <p className="text-xs text-destructive-foreground bg-destructive rounded px-2 py-1 mt-3">
-              {error}
-            </p>
-          )}
-
-          <button
-            className="btn-primary w-full mt-4 disabled:opacity-50"
-            disabled={agregando || !nombreEquipo.trim()}
-            onClick={handleAgregarEquipo}
-          >
-            {agregando ? "Agregando..." : "Agregar equipo al torneo"}
-          </button>
-        </div>
-
-        <div className="mt-6 space-y-2">
-          {slots.length >= 2 && faltan === 0 && (
-            <button
-              className="btn-primary w-full disabled:opacity-50"
-              disabled={arrancando}
-              onClick={arrancarTorneo}
-            >
-              {arrancando ? "Arrancando..." : "Arrancar torneo →"}
-            </button>
-          )}
-          {slots.length >= 2 && faltan > 0 && (
-            <>
-              <button
-                className="btn-primary w-full disabled:opacity-50"
-                disabled={arrancando}
-                onClick={handleCompletarConBots}
-              >
-                {arrancando ? "Arrancando..." : `Completar ${faltan} cupo(s) con bots y arrancar →`}
-              </button>
-              <button
-                className="btn-secondary w-full disabled:opacity-50"
-                disabled={arrancando}
-                onClick={arrancarTorneo}
-              >
-                Arrancar solo con los {slots.length} anotados →
-              </button>
-            </>
-          )}
-          {slots.length < 2 && (
-            <p className="text-xs text-muted-foreground text-center">
-              Hacen falta al menos 2 equipos para arrancar.
-            </p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 </file>
 
 <file path="src/components/online/OnlineSetupScreen.tsx">
@@ -13522,6 +13437,804 @@ export function CreatePlayerScreen({ onPlayerCreated, onCancel }: Props) {
 }
 </file>
 
+<file path="src/components/football/SetupScreen.tsx">
+import { useState } from "react";
+import { makeTeamFromSquad, useGame } from "@/lib/football/store";
+import type { Player } from "@/lib/football/types";
+import { generateSquad } from "@/lib/football/players";
+import { SquadOriginSelector } from "@/components/football/SquadOriginSelector";
+
+const COLORS = [
+  { name: "Rojo", value: "#dc2626" },
+  { name: "Azul", value: "#2563eb" },
+  { name: "Amarillo", value: "#eab308" },
+  { name: "Verde", value: "#16a34a" },
+  { name: "Negro", value: "#111827" },
+  { name: "Blanco", value: "#f8fafc" },
+  { name: "Naranja", value: "#ea580c" },
+  { name: "Violeta", value: "#7c3aed" },
+];
+
+export function SetupScreen() {
+  const { setScreen, setTeams, settings, setSettings, setActiveLockerTeam } = useGame();
+  const [name1, setName1] = useState("");
+  const [color1, setColor1] = useState(COLORS[0].value);
+  const [squad1, setSquad1] = useState<Player[]>(() => generateSquad(20));
+  const [name2, setName2] = useState("");
+  const [color2, setColor2] = useState(COLORS[1].value);
+  const [squad2, setSquad2] = useState<Player[]>(() => generateSquad(20));
+
+  const vsBot = settings.vsBot;
+  const team2Label = vsBot ? "Bot (rival)" : "Jugador 2";
+
+  function start() {
+    const t1 = makeTeamFromSquad(
+      { name: name1.trim() || "Jugador 1", color: color1, isBot: false },
+      squad1,
+    );
+    const t2 = makeTeamFromSquad(
+      { name: name2.trim() || (vsBot ? "CPU FC" : "Jugador 2"), color: color2, isBot: vsBot },
+      squad2,
+    );
+    setTeams([t1, t2]);
+    setActiveLockerTeam(0);
+    setScreen("handoff");
+  }
+
+  return (
+    <div className="min-h-screen bg-background text-foreground px-4 py-8">
+      <div className="max-w-2xl mx-auto">
+        <button className="btn-ghost mb-4" onClick={() => setScreen("home")}>← Volver</button>
+        <h1 className="font-display text-3xl font-black">Configuración de partida</h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          {vsBot ? "Vos vs Bot" : "Dos jugadores humanos, mismo dispositivo"}
+        </p>
+
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          <TeamCard
+            title="Jugador 1"
+            name={name1}
+            setName={setName1}
+            color={color1}
+            setColor={setColor1}
+            onSquadReady={setSquad1}
+          />
+          <TeamCard
+            title={team2Label}
+            name={name2}
+            setName={setName2}
+            color={color2}
+            setColor={setColor2}
+            onSquadReady={setSquad2}
+          />
+        </div>
+
+        <div className="card p-4 mt-6">
+          <h3 className="font-display text-lg font-bold">Reglas del partido</h3>
+          <div className="mt-3 space-y-3 text-sm">
+            <label className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                checked={settings.injuriesEnabled}
+                onChange={(e) => setSettings({ ...settings, injuriesEnabled: e.target.checked })}
+              />
+              Lesiones activadas
+            </label>
+            <label className="flex items-center gap-3">
+              Máximo de cambios:
+              <input
+                type="number" min={0} max={11}
+                className="input w-20"
+                value={settings.maxSubs}
+                onChange={(e) => setSettings({ ...settings, maxSubs: Math.max(0, Math.min(11, parseInt(e.target.value) || 0)) })}
+              />
+            </label>
+            <div className="border-t border-border pt-3 mt-1 space-y-3">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 shrink-0"
+                  checked={settings.seeRivalSquad ?? true}
+                  onChange={(e) => setSettings({ ...settings, seeRivalSquad: e.target.checked })}
+                />
+                <div>
+                  <div className="font-medium">Conocer plantel del rival</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    Si está desactivado, no se verán los nombres ni posiciones de los jugadores rivales en el vestuario.
+                  </div>
+                </div>
+              </label>
+              <label className={`flex items-start gap-3 ${!(settings.seeRivalSquad ?? true) ? "opacity-40 pointer-events-none" : "cursor-pointer"}`}>
+                <input
+                  type="checkbox"
+                  className="mt-0.5 shrink-0"
+                  checked={settings.seeRivalRatings ?? true}
+                  disabled={!(settings.seeRivalSquad ?? true)}
+                  onChange={(e) => setSettings({ ...settings, seeRivalRatings: e.target.checked })}
+                />
+                <div>
+                  <div className="font-medium">Conocer valoraciones del rival</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    Si está desactivado, los puntajes de los jugadores rivales se ocultan con "?" en el vestuario.
+                    Requiere "Conocer plantel del rival" activado.
+                  </div>
+                </div>
+              </label>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 shrink-0"
+                  checked={settings.seeOwnRatings ?? true}
+                  onChange={(e) => setSettings({ ...settings, seeOwnRatings: e.target.checked })}
+                />
+                <div>
+                  <div className="font-medium">Ver valoraciones propias</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    Si está desactivado, los puntajes de tus propios jugadores se ocultan en el vestuario, forzando a elegir la alineación sin ver los números.
+                  </div>
+                </div>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div className="card p-4 mt-4">
+          <h3 className="font-display text-lg font-bold">Automatizaciones</h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            Reglas que se ejecutan automáticamente durante la simulación. Todas desactivadas por defecto.
+          </p>
+          <div className="mt-3 space-y-4 text-sm">
+            <AutomationToggle
+              checked={settings.automations?.closingDown ?? false}
+              onChange={(v) => setSettings({ ...settings, automations: { ...(settings.automations ?? { exploitRedCard: false, staminaAlert: false }), closingDown: v } })}
+              label="Cerrar el partido"
+              description="Si ganás por 1 gol después del minuto 75, baja automáticamente la línea a Baja y la mentalidad a Defensivo."
+            />
+            <AutomationToggle
+              checked={settings.automations?.exploitRedCard ?? false}
+              onChange={(v) => setSettings({ ...settings, automations: { ...(settings.automations ?? { closingDown: false, staminaAlert: false }), exploitRedCard: v } })}
+              label="Explotar inferioridad rival"
+              description="Si el rival queda con un jugador expulsado, sube automáticamente la línea a Alta."
+            />
+            <AutomationToggle
+              checked={settings.automations?.staminaAlert ?? false}
+              onChange={(v) => setSettings({ ...settings, automations: { ...(settings.automations ?? { closingDown: false, exploitRedCard: false }), staminaAlert: v } })}
+              label="Alerta de cansancio"
+              description="Cuando un jugador propio baja del 60 % de energía, aparece una notificación en el relato sugiriendo el cambio."
+            />
+          </div>
+        </div>
+
+        <button className="btn-primary mt-6 w-full" onClick={start}>Continuar al vestuario →</button>
+      </div>
+    </div>
+  );
+}
+
+function AutomationToggle({ checked, onChange, label, description }: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  description: string;
+}) {
+  return (
+    <label className="flex items-start gap-3 cursor-pointer">
+      <input
+        type="checkbox"
+        className="mt-0.5 shrink-0"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <div>
+        <div className="font-medium">{label}</div>
+        <div className="text-xs text-muted-foreground mt-0.5">{description}</div>
+      </div>
+    </label>
+  );
+}
+
+function TeamCard({
+  title,
+  name,
+  setName,
+  color,
+  setColor,
+  onSquadReady,
+}: {
+  title: string;
+  name: string;
+  setName: (v: string) => void;
+  color: string;
+  setColor: (v: string) => void;
+  onSquadReady: (squad: Player[]) => void;
+}) {
+  return (
+    <div className="card p-4">
+      <h3 className="font-display font-bold text-lg">{title}</h3>
+      <label className="block mt-3 text-xs uppercase tracking-wider text-muted-foreground">
+        Nombre del equipo
+      </label>
+      <input
+        className="input mt-1 w-full"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Ej: Los Titanes"
+      />
+      <label className="block mt-3 text-xs uppercase tracking-wider text-muted-foreground">
+        Color de camiseta
+      </label>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {COLORS.map((c) => (
+          <button
+            key={c.value}
+            aria-label={c.name}
+            onClick={() => setColor(c.value)}
+            className={`h-8 w-8 rounded-full border-2 transition ${
+              color === c.value ? "border-primary scale-110" : "border-border"
+            }`}
+            style={{ backgroundColor: c.value }}
+          />
+        ))}
+      </div>
+      <SquadOriginSelector onSquadReady={onSquadReady} />
+    </div>
+  );
+}
+</file>
+
+<file path="src/components/football/TournamentSetupScreen.tsx">
+import { useEffect, useState } from "react";
+import { useGame } from "@/lib/football/store";
+import { generateSquad } from "@/lib/football/players";
+import { makeTeamFromSquad } from "@/lib/football/store";
+import { autoBotTeam } from "@/lib/football/bot";
+import { SquadOriginSelector } from "@/components/football/SquadOriginSelector";
+import { useAuth } from "@/hooks/use-auth";
+import type { Player } from "@/lib/football/types";
+import type { TournamentFormat, TournamentSlot } from "@/lib/football/tournament-types";
+import { crearTorneo, agregarSlot, fetchSlots, fetchTorneo, generarFixtureYArrancar } from "@/lib/football/tournament-api";
+
+const COLORS = [
+  { name: "Rojo", value: "#dc2626" },
+  { name: "Azul", value: "#2563eb" },
+  { name: "Amarillo", value: "#eab308" },
+  { name: "Verde", value: "#16a34a" },
+  { name: "Negro", value: "#111827" },
+  { name: "Blanco", value: "#f8fafc" },
+  { name: "Naranja", value: "#ea580c" },
+  { name: "Violeta", value: "#7c3aed" },
+];
+
+type Paso = "config" | "equipos";
+
+export function TournamentSetupScreen() {
+  const { setScreen, settings, tournamentId, setTournamentId } = useGame();
+  const { user } = useAuth();
+
+  const [paso, setPaso] = useState<Paso>("config");
+  const [nombre, setNombre] = useState("");
+  const [formato, setFormato] = useState<TournamentFormat>("liga_simple");
+  const [targetSlotCount, setTargetSlotCount] = useState(8);
+  const [creando, setCreando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // ── Configuración online ──────────────────────────────────────────────
+  const [esOnline, setEsOnline] = useState(false);
+  const [modoHorario, setModoHorario] = useState<"manual" | "automatico_simultaneo" | "automatico_escalonado">("automatico_simultaneo");
+  const [intervaloHoras, setIntervaloHoras] = useState(72);
+  const [horarioAleatorio, setHorarioAleatorio] = useState(false);
+  const [rangoInicio, setRangoInicio] = useState("19:00");
+  const [rangoFin, setRangoFin] = useState("23:00");
+  const [codigoSalaCreado, setCodigoSalaCreado] = useState<string | null>(null);
+
+  const [slots, setSlots] = useState<TournamentSlot[]>([]);
+  const [arrancando, setArrancando] = useState(false);
+
+  // ── Formulario del equipo que se está agregando ──────────────────────────
+  const [nombreEquipo, setNombreEquipo] = useState("");
+  const [colorEquipo, setColorEquipo] = useState(COLORS[0].value);
+  const [squadEquipo, setSquadEquipo] = useState<Player[]>(() => generateSquad(20));
+  const [agregando, setAgregando] = useState(false);
+  /** Solo se usa en torneos locales — en online el tipo se decide solo (ver handleAgregarEquipo). */
+  const [tipoEquipoLocal, setTipoEquipoLocal] = useState<"jugador" | "bot">("jugador");
+
+  // ── Retomar un torneo "armado" ya existente (antes esto creaba un
+  // torneo nuevo duplicado en vez de retomar el que ya estaba armado) ──
+  const [initialTournamentId] = useState(tournamentId);
+
+  useEffect(() => {
+    if (!initialTournamentId) return;
+    let cancelado = false;
+    (async () => {
+      try {
+        const torneo = await fetchTorneo(initialTournamentId);
+        const slotsExistentes = await fetchSlots(initialTournamentId);
+        if (cancelado) return;
+        setNombre(torneo.name);
+        setFormato(torneo.format);
+        setTargetSlotCount(torneo.targetSlotCount);
+        setEsOnline(torneo.isOnline);
+        if (torneo.modoHorario) setModoHorario(torneo.modoHorario);
+        setHorarioAleatorio(torneo.horarioAleatorio ?? false);
+        if (torneo.rangoHorarioInicio) setRangoInicio(torneo.rangoHorarioInicio);
+        if (torneo.rangoHorarioFin) setRangoFin(torneo.rangoHorarioFin);
+        if (torneo.intervaloHoras) setIntervaloHoras(torneo.intervaloHoras);
+        setCodigoSalaCreado(torneo.roomCode ?? null);
+        setSlots(slotsExistentes);
+        setPaso("equipos");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "No se pudo cargar el torneo existente.");
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleCrearTorneo() {
+    if (!nombre.trim()) return;
+    if (!user) {
+      setError("Necesitás iniciar sesión para crear un torneo.");
+      return;
+    }
+    setCreando(true);
+    setError(null);
+    try {
+      const torneo = await crearTorneo({
+        nombre: nombre.trim(),
+        formato,
+        targetSlotCount,
+        matchSettings: settings,
+        esOnline,
+        modoHorario: esOnline ? modoHorario : undefined,
+        horarioAleatorio: esOnline ? horarioAleatorio : undefined,
+        rangoHorarioInicio: esOnline && horarioAleatorio ? rangoInicio : undefined,
+        rangoHorarioFin: esOnline && horarioAleatorio ? rangoFin : undefined,
+        intervaloHoras: esOnline ? intervaloHoras : undefined,
+      });
+      setTournamentId(torneo.id);
+      setCodigoSalaCreado(torneo.roomCode ?? null);
+      setPaso("equipos");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo crear el torneo.");
+    } finally {
+      setCreando(false);
+    }
+  }
+
+  async function handleAgregarEquipo() {
+    if (!tournamentId || !nombreEquipo.trim()) return;
+    setAgregando(true);
+    setError(null);
+    try {
+      // En torneos online: el primer equipo que agrega el admin es el suyo
+      // propio; cualquier equipo agregado después pasa a ser un bot (con
+      // nombre/color/plantel elegidos a mano, no al azar). En torneos
+      // locales no aplica esta regla — todos los agregados acá son "humanos"
+      // como siempre, porque se asume un solo dispositivo pasando de mano en
+      // mano.
+      // Online: el primero que agrega el admin es su propio equipo, el resto
+      // pasa a ser bot automáticamente. Local: lo elige a mano con el toggle
+      // Jugador/Bot, ya que ahí una sola persona suele armar varios equipos.
+      const yaTieneEquipoPropio = slots.some((s) => s.ownerUserId === user?.id);
+      const esBotNuevo = esOnline ? yaTieneEquipoPropio : tipoEquipoLocal === "bot";
+
+      const team = makeTeamFromSquad(
+        { name: nombreEquipo.trim(), color: colorEquipo, isBot: esBotNuevo },
+        squadEquipo,
+      );
+      await agregarSlot({
+        torneoId: tournamentId,
+        displayName: team.config.name,
+        teamConfig: team.config,
+        squad: team.squad,
+        formation: team.formation,
+        style: team.style,
+        lineHeight: team.lineHeight,
+        buildUp: team.buildUp,
+        pressIntensity: team.pressIntensity,
+        ownerUserId: esBotNuevo ? undefined : user?.id,
+        seed: slots.length,
+      });
+      const actualizados = await fetchSlots(tournamentId);
+      setSlots(actualizados);
+      setNombreEquipo("");
+      setColorEquipo(COLORS[(actualizados.length) % COLORS.length].value);
+      setSquadEquipo(generateSquad(20));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo agregar el equipo.");
+    } finally {
+      setAgregando(false);
+    }
+  }
+
+  async function handleCompletarConBots() {
+    if (!tournamentId) return;
+    setArrancando(true);
+    setError(null);
+    try {
+      let actuales = slots.length;
+      let seed = actuales;
+      while (actuales < targetSlotCount) {
+        const squad = generateSquad(20);
+        const team = makeTeamFromSquad(
+          { name: `Bot ${seed + 1}`, color: COLORS[seed % COLORS.length].value, isBot: true },
+          squad,
+        );
+        autoBotTeam(team);
+        await agregarSlot({
+          torneoId: tournamentId,
+          displayName: team.config.name,
+          teamConfig: team.config,
+          squad: team.squad,
+          formation: team.formation,
+          style: team.style,
+          lineHeight: team.lineHeight,
+          buildUp: team.buildUp,
+          pressIntensity: team.pressIntensity,
+          seed,
+        });
+        seed++;
+        actuales++;
+      }
+      const actualizados = await fetchSlots(tournamentId);
+      setSlots(actualizados);
+      await arrancarTorneo();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo completar con bots.");
+      setArrancando(false);
+    }
+  }
+
+  async function arrancarTorneo() {
+    if (!tournamentId) return;
+    setArrancando(true);
+    setError(null);
+    try {
+      await generarFixtureYArrancar(tournamentId);
+      setScreen("tournament_hub");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo arrancar el torneo.");
+      setArrancando(false);
+    }
+  }
+
+  // ── Paso 1: configuración base del torneo ────────────────────────────────
+
+  if (paso === "config") {
+    return (
+      <div className="min-h-screen bg-background text-foreground px-4 py-8">
+        <div className="max-w-lg mx-auto">
+          <button className="btn-ghost mb-4" onClick={() => setScreen("home")}>← Volver</button>
+          <h1 className="font-display text-3xl font-black">Nuevo torneo</h1>
+
+          <div className="card p-4 mt-6 space-y-4">
+            <div>
+              <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
+                Nombre del torneo
+              </label>
+              <input
+                className="input w-full"
+                placeholder="Ej: Liga de Verano"
+                value={nombre}
+                onChange={(e) => setNombre(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
+                Formato
+              </label>
+              <div className="grid grid-cols-1 gap-2">
+                <button
+                  type="button"
+                  className={`chip py-2 ${formato === "liga_simple" ? "chip-active" : ""}`}
+                  onClick={() => setFormato("liga_simple")}
+                >
+                  Liga (todos contra todos, ida única)
+                </button>
+                <button
+                  type="button"
+                  className={`chip py-2 ${formato === "liga_ida_vuelta" ? "chip-active" : ""}`}
+                  onClick={() => setFormato("liga_ida_vuelta")}
+                >
+                  Liga (ida y vuelta)
+                </button>
+                <button
+                  type="button"
+                  className={`chip py-2 ${formato === "eliminacion_directa" ? "chip-active" : ""}`}
+                  onClick={() => setFormato("eliminacion_directa")}
+                >
+                  Copa (eliminación directa)
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
+                Cantidad de equipos
+              </label>
+              <input
+                type="number"
+                min={2}
+                max={16}
+                className="input w-24"
+                value={targetSlotCount}
+                onChange={(e) =>
+                  setTargetSlotCount(Math.max(2, Math.min(16, parseInt(e.target.value) || 2)))
+                }
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Podés arrancar con menos equipos de los que anotes acá — al arrancar vas a poder
+                completar los cupos vacíos con bots, o jugar solo con los que se hayan anotado.
+                {formato === "eliminacion_directa" &&
+                  " Para Copa, si no llegás a una potencia de 2 (4, 8, 16), se completa con bots automáticamente."}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
+                Modalidad
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" className={`chip py-2 ${!esOnline ? "chip-active" : ""}`} onClick={() => setEsOnline(false)}>
+                  Local
+                </button>
+                <button type="button" className={`chip py-2 ${esOnline ? "chip-active" : ""}`} onClick={() => setEsOnline(true)}>
+                  Online
+                </button>
+              </div>
+            </div>
+
+            {esOnline && (
+              <div className="rounded-lg border border-border p-3 space-y-3">
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
+                    ¿Cómo se juegan los partidos?
+                  </label>
+                  <div className="grid grid-cols-1 gap-2">
+                    <button
+                      type="button"
+                      className={`chip py-2 text-left px-3 ${modoHorario === "automatico_simultaneo" ? "chip-active" : ""}`}
+                      onClick={() => setModoHorario("automatico_simultaneo")}
+                    >
+                      Automático: toda la ronda al mismo horario
+                    </button>
+                    <button
+                      type="button"
+                      className={`chip py-2 text-left px-3 ${modoHorario === "automatico_escalonado" ? "chip-active" : ""}`}
+                      onClick={() => setModoHorario("automatico_escalonado")}
+                    >
+                      Automático: un partido tras otro, cada tanto
+                    </button>
+                    <button
+                      type="button"
+                      className={`chip py-2 text-left px-3 ${modoHorario === "manual" ? "chip-active" : ""}`}
+                      onClick={() => setModoHorario("manual")}
+                    >
+                      Manual: yo elijo cada horario a mano
+                    </button>
+                  </div>
+                </div>
+
+                {modoHorario !== "manual" && (
+                  <>
+                    <div>
+                      <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
+                        {modoHorario === "automatico_simultaneo" ? "Horas entre ronda y ronda" : "Horas entre partido y partido"}
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        className="input w-24"
+                        value={intervaloHoras}
+                        onChange={(e) => setIntervaloHoras(Math.max(1, parseInt(e.target.value) || 1))}
+                      />
+                    </div>
+
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={horarioAleatorio}
+                        onChange={(e) => setHorarioAleatorio(e.target.checked)}
+                      />
+                      Elegir el horario al azar dentro de un rango, en vez de uno fijo
+                    </label>
+
+                    {horarioAleatorio && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">Desde</label>
+                          <input type="time" className="input w-full" value={rangoInicio} onChange={(e) => setRangoInicio(e.target.value)} />
+                        </div>
+                        <div>
+                          <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">Hasta</label>
+                          <input type="time" className="input w-full" value={rangoFin} onChange={(e) => setRangoFin(e.target.value)} />
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                <p className="text-xs text-muted-foreground">
+                  Se va a generar un código de 6 letras al crear el torneo, para que otros se anoten con su equipo.
+                </p>
+              </div>
+            )}
+
+            {error && (
+              <p className="text-xs text-destructive-foreground bg-destructive rounded px-2 py-1">
+                {error}
+              </p>
+            )}
+
+            <button
+              className="btn-primary w-full disabled:opacity-50"
+              disabled={creando || !nombre.trim()}
+              onClick={handleCrearTorneo}
+            >
+              {creando ? "Creando..." : "Siguiente: agregar equipos →"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Paso 2: agregar equipos ───────────────────────────────────────────────
+
+  const faltan = Math.max(0, targetSlotCount - slots.length);
+
+  return (
+    <div className="min-h-screen bg-background text-foreground px-4 py-8">
+      <div className="max-w-2xl mx-auto">
+        <h1 className="font-display text-3xl font-black">{nombre}</h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          {slots.length} de {targetSlotCount} equipos anotados
+        </p>
+
+        {codigoSalaCreado && (
+          <div className="card p-4 mt-4 bg-primary/10 border border-primary/30 text-center">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground">Código del torneo</div>
+            <div className="font-display text-3xl font-black tracking-[0.3em] mt-1">{codigoSalaCreado}</div>
+            <p className="text-xs text-muted-foreground mt-1">Compartilo para que otros se anoten con su equipo.</p>
+          </div>
+        )}
+
+        {slots.length > 0 && (
+          <div className="card p-4 mt-4">
+            <h3 className="font-display text-lg font-bold">Equipos anotados</h3>
+            <ul className="mt-2 space-y-1 text-sm">
+              {slots.map((s) => (
+                <li key={s.id} className="flex items-center gap-2">
+                  <span
+                    className="h-3 w-3 rounded-full inline-block"
+                    style={{ backgroundColor: s.teamConfig.color }}
+                  />
+                  {s.displayName}
+                  {s.teamConfig.isBot && (
+                    <span className="text-xs text-muted-foreground">(bot)</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="card p-4 mt-4">
+          <h3 className="font-display font-bold text-lg">Agregar equipo</h3>
+          {esOnline && slots.some((s) => s.ownerUserId === user?.id) && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Ya tenés tu equipo anotado — el que agregues ahora va a quedar como equipo bot del torneo.
+            </p>
+          )}
+          {!esOnline && (
+            <div className="mt-3">
+              <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">
+                Este equipo es de...
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className={`chip py-2 ${tipoEquipoLocal === "jugador" ? "chip-active" : ""}`}
+                  onClick={() => setTipoEquipoLocal("jugador")}
+                >
+                  Un jugador
+                </button>
+                <button
+                  type="button"
+                  className={`chip py-2 ${tipoEquipoLocal === "bot" ? "chip-active" : ""}`}
+                  onClick={() => setTipoEquipoLocal("bot")}
+                >
+                  La CPU (bot)
+                </button>
+              </div>
+            </div>
+          )}
+          <label className="block mt-3 text-xs uppercase tracking-wider text-muted-foreground">
+            Nombre del equipo
+          </label>
+          <input
+            className="input mt-1 w-full"
+            value={nombreEquipo}
+            onChange={(e) => setNombreEquipo(e.target.value)}
+            placeholder="Ej: Los Titanes"
+          />
+          <label className="block mt-3 text-xs uppercase tracking-wider text-muted-foreground">
+            Color de camiseta
+          </label>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {COLORS.map((c) => (
+              <button
+                key={c.value}
+                type="button"
+                aria-label={c.name}
+                onClick={() => setColorEquipo(c.value)}
+                className={`h-8 w-8 rounded-full border-2 transition ${
+                  colorEquipo === c.value ? "border-primary scale-110" : "border-border"
+                }`}
+                style={{ backgroundColor: c.value }}
+              />
+            ))}
+          </div>
+          <SquadOriginSelector onSquadReady={setSquadEquipo} />
+
+          {error && (
+            <p className="text-xs text-destructive-foreground bg-destructive rounded px-2 py-1 mt-3">
+              {error}
+            </p>
+          )}
+
+          <button
+            className="btn-primary w-full mt-4 disabled:opacity-50"
+            disabled={agregando || !nombreEquipo.trim()}
+            onClick={handleAgregarEquipo}
+          >
+            {agregando ? "Agregando..." : "Agregar equipo al torneo"}
+          </button>
+        </div>
+
+        <div className="mt-6 space-y-2">
+          {slots.length >= 2 && faltan === 0 && (
+            <button
+              className="btn-primary w-full disabled:opacity-50"
+              disabled={arrancando}
+              onClick={arrancarTorneo}
+            >
+              {arrancando ? "Arrancando..." : "Arrancar torneo →"}
+            </button>
+          )}
+          {slots.length >= 2 && faltan > 0 && (
+            <>
+              <button
+                className="btn-primary w-full disabled:opacity-50"
+                disabled={arrancando}
+                onClick={handleCompletarConBots}
+              >
+                {arrancando ? "Arrancando..." : `Completar ${faltan} cupo(s) con bots y arrancar →`}
+              </button>
+              <button
+                className="btn-secondary w-full disabled:opacity-50"
+                disabled={arrancando}
+                onClick={arrancarTorneo}
+              >
+                Arrancar solo con los {slots.length} anotados →
+              </button>
+            </>
+          )}
+          {slots.length < 2 && (
+            <p className="text-xs text-muted-foreground text-center">
+              Hacen falta al menos 2 equipos para arrancar.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+</file>
+
 <file path="src/lib/football/api-football.ts">
 /**
  * api-football.ts
@@ -14345,251 +15058,6 @@ export interface Tournament {
   createdAt: string;
   finishedAt?: string;
   championSlotId?: string;
-}
-</file>
-
-<file path="src/components/football/SetupScreen.tsx">
-import { useState } from "react";
-import { makeTeamFromSquad, useGame } from "@/lib/football/store";
-import type { Player } from "@/lib/football/types";
-import { generateSquad } from "@/lib/football/players";
-import { SquadOriginSelector } from "@/components/football/SquadOriginSelector";
-
-const COLORS = [
-  { name: "Rojo", value: "#dc2626" },
-  { name: "Azul", value: "#2563eb" },
-  { name: "Amarillo", value: "#eab308" },
-  { name: "Verde", value: "#16a34a" },
-  { name: "Negro", value: "#111827" },
-  { name: "Blanco", value: "#f8fafc" },
-  { name: "Naranja", value: "#ea580c" },
-  { name: "Violeta", value: "#7c3aed" },
-];
-
-export function SetupScreen() {
-  const { setScreen, setTeams, settings, setSettings, setActiveLockerTeam } = useGame();
-  const [name1, setName1] = useState("");
-  const [color1, setColor1] = useState(COLORS[0].value);
-  const [squad1, setSquad1] = useState<Player[]>(() => generateSquad(20));
-  const [name2, setName2] = useState("");
-  const [color2, setColor2] = useState(COLORS[1].value);
-  const [squad2, setSquad2] = useState<Player[]>(() => generateSquad(20));
-
-  const vsBot = settings.vsBot;
-  const team2Label = vsBot ? "Bot (rival)" : "Jugador 2";
-
-  function start() {
-    const t1 = makeTeamFromSquad(
-      { name: name1.trim() || "Jugador 1", color: color1, isBot: false },
-      squad1,
-    );
-    const t2 = makeTeamFromSquad(
-      { name: name2.trim() || (vsBot ? "CPU FC" : "Jugador 2"), color: color2, isBot: vsBot },
-      squad2,
-    );
-    setTeams([t1, t2]);
-    setActiveLockerTeam(0);
-    setScreen("handoff");
-  }
-
-  return (
-    <div className="min-h-screen bg-background text-foreground px-4 py-8">
-      <div className="max-w-2xl mx-auto">
-        <button className="btn-ghost mb-4" onClick={() => setScreen("home")}>← Volver</button>
-        <h1 className="font-display text-3xl font-black">Configuración de partida</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          {vsBot ? "Vos vs Bot" : "Dos jugadores humanos, mismo dispositivo"}
-        </p>
-
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <TeamCard
-            title="Jugador 1"
-            name={name1}
-            setName={setName1}
-            color={color1}
-            setColor={setColor1}
-            onSquadReady={setSquad1}
-          />
-          <TeamCard
-            title={team2Label}
-            name={name2}
-            setName={setName2}
-            color={color2}
-            setColor={setColor2}
-            onSquadReady={setSquad2}
-          />
-        </div>
-
-        <div className="card p-4 mt-6">
-          <h3 className="font-display text-lg font-bold">Reglas del partido</h3>
-          <div className="mt-3 space-y-3 text-sm">
-            <label className="flex items-center gap-3">
-              <input
-                type="checkbox"
-                checked={settings.injuriesEnabled}
-                onChange={(e) => setSettings({ ...settings, injuriesEnabled: e.target.checked })}
-              />
-              Lesiones activadas
-            </label>
-            <label className="flex items-center gap-3">
-              Máximo de cambios:
-              <input
-                type="number" min={0} max={11}
-                className="input w-20"
-                value={settings.maxSubs}
-                onChange={(e) => setSettings({ ...settings, maxSubs: Math.max(0, Math.min(11, parseInt(e.target.value) || 0)) })}
-              />
-            </label>
-            <div className="border-t border-border pt-3 mt-1 space-y-3">
-              <label className="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 shrink-0"
-                  checked={settings.seeRivalSquad ?? true}
-                  onChange={(e) => setSettings({ ...settings, seeRivalSquad: e.target.checked })}
-                />
-                <div>
-                  <div className="font-medium">Conocer plantel del rival</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    Si está desactivado, no se verán los nombres ni posiciones de los jugadores rivales en el vestuario.
-                  </div>
-                </div>
-              </label>
-              <label className={`flex items-start gap-3 ${!(settings.seeRivalSquad ?? true) ? "opacity-40 pointer-events-none" : "cursor-pointer"}`}>
-                <input
-                  type="checkbox"
-                  className="mt-0.5 shrink-0"
-                  checked={settings.seeRivalRatings ?? true}
-                  disabled={!(settings.seeRivalSquad ?? true)}
-                  onChange={(e) => setSettings({ ...settings, seeRivalRatings: e.target.checked })}
-                />
-                <div>
-                  <div className="font-medium">Conocer valoraciones del rival</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    Si está desactivado, los puntajes de los jugadores rivales se ocultan con "?" en el vestuario.
-                    Requiere "Conocer plantel del rival" activado.
-                  </div>
-                </div>
-              </label>
-              <label className="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 shrink-0"
-                  checked={settings.seeOwnRatings ?? true}
-                  onChange={(e) => setSettings({ ...settings, seeOwnRatings: e.target.checked })}
-                />
-                <div>
-                  <div className="font-medium">Ver valoraciones propias</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    Si está desactivado, los puntajes de tus propios jugadores se ocultan en el vestuario, forzando a elegir la alineación sin ver los números.
-                  </div>
-                </div>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div className="card p-4 mt-4">
-          <h3 className="font-display text-lg font-bold">Automatizaciones</h3>
-          <p className="text-xs text-muted-foreground mt-1">
-            Reglas que se ejecutan automáticamente durante la simulación. Todas desactivadas por defecto.
-          </p>
-          <div className="mt-3 space-y-4 text-sm">
-            <AutomationToggle
-              checked={settings.automations?.closingDown ?? false}
-              onChange={(v) => setSettings({ ...settings, automations: { ...(settings.automations ?? { exploitRedCard: false, staminaAlert: false }), closingDown: v } })}
-              label="Cerrar el partido"
-              description="Si ganás por 1 gol después del minuto 75, baja automáticamente la línea a Baja y la mentalidad a Defensivo."
-            />
-            <AutomationToggle
-              checked={settings.automations?.exploitRedCard ?? false}
-              onChange={(v) => setSettings({ ...settings, automations: { ...(settings.automations ?? { closingDown: false, staminaAlert: false }), exploitRedCard: v } })}
-              label="Explotar inferioridad rival"
-              description="Si el rival queda con un jugador expulsado, sube automáticamente la línea a Alta."
-            />
-            <AutomationToggle
-              checked={settings.automations?.staminaAlert ?? false}
-              onChange={(v) => setSettings({ ...settings, automations: { ...(settings.automations ?? { closingDown: false, exploitRedCard: false }), staminaAlert: v } })}
-              label="Alerta de cansancio"
-              description="Cuando un jugador propio baja del 60 % de energía, aparece una notificación en el relato sugiriendo el cambio."
-            />
-          </div>
-        </div>
-
-        <button className="btn-primary mt-6 w-full" onClick={start}>Continuar al vestuario →</button>
-      </div>
-    </div>
-  );
-}
-
-function AutomationToggle({ checked, onChange, label, description }: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-  description: string;
-}) {
-  return (
-    <label className="flex items-start gap-3 cursor-pointer">
-      <input
-        type="checkbox"
-        className="mt-0.5 shrink-0"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-      <div>
-        <div className="font-medium">{label}</div>
-        <div className="text-xs text-muted-foreground mt-0.5">{description}</div>
-      </div>
-    </label>
-  );
-}
-
-function TeamCard({
-  title,
-  name,
-  setName,
-  color,
-  setColor,
-  onSquadReady,
-}: {
-  title: string;
-  name: string;
-  setName: (v: string) => void;
-  color: string;
-  setColor: (v: string) => void;
-  onSquadReady: (squad: Player[]) => void;
-}) {
-  return (
-    <div className="card p-4">
-      <h3 className="font-display font-bold text-lg">{title}</h3>
-      <label className="block mt-3 text-xs uppercase tracking-wider text-muted-foreground">
-        Nombre del equipo
-      </label>
-      <input
-        className="input mt-1 w-full"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="Ej: Los Titanes"
-      />
-      <label className="block mt-3 text-xs uppercase tracking-wider text-muted-foreground">
-        Color de camiseta
-      </label>
-      <div className="mt-2 flex flex-wrap gap-2">
-        {COLORS.map((c) => (
-          <button
-            key={c.value}
-            aria-label={c.name}
-            onClick={() => setColor(c.value)}
-            className={`h-8 w-8 rounded-full border-2 transition ${
-              color === c.value ? "border-primary scale-110" : "border-border"
-            }`}
-            style={{ backgroundColor: c.value }}
-          />
-        ))}
-      </div>
-      <SquadOriginSelector onSquadReady={onSquadReady} />
-    </div>
-  );
 }
 </file>
 
@@ -16346,7 +16814,7 @@ function ApiMode({
 import { useEffect, useState } from "react";
 import { useGame } from "@/lib/football/store";
 import { useAuth } from "@/hooks/use-auth";
-import { fetchTorneo, fetchSlots, fetchFixture, teamFromSlot, avanzarRondaSiCorresponde, finalizarLigaSiCorresponde } from "@/lib/football/tournament-api";
+import { fetchTorneo, fetchSlots, fetchFixture, teamFromSlot, avanzarRondaSiCorresponde, finalizarLigaSiCorresponde, asignarHoraPartido, esAdminDeTorneo } from "@/lib/football/tournament-api";
 import { resolverPartidoAutomatico } from "@/lib/football/tournament-bot-resolve";
 import { computeStandings } from "@/lib/football/tournament-standings";
 import type { Tournament, TournamentSlot, TournamentFixtureMatch } from "@/lib/football/tournament-types";
@@ -16355,6 +16823,7 @@ export function TournamentHubScreen() {
   const {
     tournamentId, reset, setScreen, setSettings, setTeams,
     setActiveLockerTeam, setTournamentActiveMatchId, setTournamentActiveMatchIsKnockout,
+    setTournamentLiveMatchId,
   } = useGame();
   const { user } = useAuth();
 
@@ -16364,6 +16833,10 @@ export function TournamentHubScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [resolviendoId, setResolviendoId] = useState<string | null>(null);
+  const [horarioElegido, setHorarioElegido] = useState("");
+  const [guardandoHorario, setGuardandoHorario] = useState(false);
+  const [soyAdminTorneo, setSoyAdminTorneo] = useState(false);
+
 
   useEffect(() => {
     if (!tournamentId) return;
@@ -16392,6 +16865,11 @@ export function TournamentHubScreen() {
         setSlots(s);
         setFixture(f);
         setError(null);
+        if (t.isOnline) {
+          esAdminDeTorneo(tournamentId!)
+            .then((esAdmin) => { if (!cancelado) setSoyAdminTorneo(esAdmin); })
+            .catch(() => { if (!cancelado) setSoyAdminTorneo(false); });
+        }
       } catch (e) {
         if (!cancelado) setError(e instanceof Error ? e.message : "No se pudo cargar el torneo.");
       } finally {
@@ -16421,14 +16899,35 @@ export function TournamentHubScreen() {
     );
   }
 
+  function formatHorario(fechaISO: string | undefined): string {
+    if (!fechaISO) return "Sin horario asignado";
+    const d = new Date(fechaISO);
+    return d.toLocaleString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
   const nombreSlot = (id: string) => slots.find((s) => s.id === id)?.displayName ?? "?";
   const esBot = (id: string) => slots.find((s) => s.id === id)?.teamConfig.isBot ?? false;
   const esLiga = tournament.format !== "eliminacion_directa";
   const standings = esLiga ? computeStandings(slots, fixture) : [];
 
+  const miSlotId = slots.find((s) => s.ownerUserId === user?.id)?.id;
   const pendientes = fixture
     .filter((m) => m.status === "pendiente")
-    .sort((a, b) => a.round - b.round);
+    .sort((a, b) => {
+      // Priorizar partidos donde el usuario es partícipe
+      const aEsMio = a.homeSlotId === miSlotId || a.awaySlotId === miSlotId;
+      const bEsMio = b.homeSlotId === miSlotId || b.awaySlotId === miSlotId;
+      if (aEsMio && !bEsMio) return -1;
+      if (!aEsMio && bEsMio) return 1;
+      // Si ambos son míos o ninguno, ordenar por ronda
+      return a.round - b.round;
+    });
   const proximo = pendientes[0] ?? null;
   const jugados = fixture.filter((m) => m.status === "jugado");
 
@@ -16442,6 +16941,22 @@ export function TournamentHubScreen() {
     setTournamentActiveMatchId(m.id);
     setTournamentActiveMatchIsKnockout(tournament.format === "eliminacion_directa");
     setScreen("handoff");
+  }
+
+  async function guardarHorario(m: TournamentFixtureMatch) {
+    if (!horarioElegido || !tournamentId) return;
+    setGuardandoHorario(true);
+    setError(null);
+    try {
+      await asignarHoraPartido(m.id, new Date(horarioElegido).toISOString());
+      const f = await fetchFixture(tournamentId);
+      setFixture(f);
+      setHorarioElegido("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar el horario.");
+    } finally {
+      setGuardandoHorario(false);
+    }
   }
 
   async function resolverAutomatico(m: TournamentFixtureMatch) {
@@ -16507,25 +17022,83 @@ export function TournamentHubScreen() {
         <div className="card p-4 mt-6">
           <h2 className="font-display text-lg font-bold">Próximo partido</h2>
           {proximo ? (
-            <div className="mt-3 flex items-center justify-between gap-3">
-              <div className="text-sm">
-                <div className="font-medium">
-                  {nombreSlot(proximo.homeSlotId)} vs {nombreSlot(proximo.awaySlotId)}
+            <div className="mt-3 space-y-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <div className="font-medium">
+                    {nombreSlot(proximo.homeSlotId)} vs {nombreSlot(proximo.awaySlotId)}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Ronda {proximo.round}
+                    {tournament.isOnline && proximo.scheduledAt && (
+                      <span className="ml-2">· {formatHorario(proximo.scheduledAt)}</span>
+                    )}
+                  </div>
                 </div>
-                <div className="text-xs text-muted-foreground">Ronda {proximo.round}</div>
+                {!tournament.isOnline && (
+                  <>
+                    {esBot(proximo.homeSlotId) && esBot(proximo.awaySlotId) ? (
+                      <button
+                        className="btn-secondary disabled:opacity-50"
+                        disabled={resolviendoId === proximo.id}
+                        onClick={() => resolverAutomatico(proximo)}
+                      >
+                        {resolviendoId === proximo.id ? "Resolviendo..." : "Resolver automático"}
+                      </button>
+                    ) : (
+                      <button className="btn-primary" onClick={() => jugarPartido(proximo)}>
+                        Jugar →
+                      </button>
+                    )}
+                  </>
+                )}
+                {tournament.isOnline && (
+                  <>
+                    {proximo.scheduledAt && (
+                      <button
+                        className="btn-primary"
+                        onClick={() => { setTournamentLiveMatchId(proximo.id); setScreen("tournament_match_live"); }}
+                      >
+                        Ver partido →
+                      </button>
+                    )}
+                    {!proximo.scheduledAt && soyAdminTorneo && tournament.modoHorario === "manual" && (
+                      <div className="flex flex-col items-end gap-1 w-full sm:w-auto">
+                        <input
+                          type="datetime-local"
+                          className="input text-xs w-full"
+                          value={horarioElegido}
+                          onChange={(e) => setHorarioElegido(e.target.value)}
+                          min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+                        />
+                        <button
+                          className="btn-primary text-xs disabled:opacity-50 w-full"
+                          disabled={!horarioElegido || guardandoHorario}
+                          onClick={() => guardarHorario(proximo)}
+                        >
+                          {guardandoHorario ? "Guardando..." : "Asignar horario"}
+                        </button>
+                      </div>
+                    )}
+                    {!proximo.scheduledAt && soyAdminTorneo && tournament.modoHorario !== "manual" && (
+                      <span className="text-xs text-muted-foreground">
+                        El torneo usa horario automático. El sistema asignará la hora.
+                      </span>
+                    )}
+                    {!proximo.scheduledAt && !soyAdminTorneo && (
+                      <span className="text-xs text-muted-foreground">Esperando que un admin asigne el horario.</span>
+                    )}
+                  </>
+                )}
               </div>
-              {esBot(proximo.homeSlotId) && esBot(proximo.awaySlotId) ? (
-                <button
-                  className="btn-secondary disabled:opacity-50"
-                  disabled={resolviendoId === proximo.id}
-                  onClick={() => resolverAutomatico(proximo)}
-                >
-                  {resolviendoId === proximo.id ? "Resolviendo..." : "Resolver automático"}
-                </button>
-              ) : (
-                <button className="btn-primary" onClick={() => jugarPartido(proximo)}>
-                  Jugar →
-                </button>
+              {tournament.isOnline && proximo.scheduledAt && (
+                <div className="text-xs text-muted-foreground border-t border-border pt-2 mt-1">
+                  {new Date(proximo.scheduledAt) > new Date() ? (
+                    `El partido comenzará en ${Math.round((new Date(proximo.scheduledAt).getTime() - Date.now()) / 60000)} minutos.`
+                  ) : (
+                    "El partido debería estar en curso o ya terminó."
+                  )}
+                </div>
               )}
             </div>
           ) : tournament.status === "finalizado" ? (
@@ -17331,721 +17904,6 @@ function eventClass(kind: string, text?: string): string {
 }
 </file>
 
-<file path="src/lib/football/tournament-api.ts">
-'use client';
-/**
- * tournament-api.ts — helpers cliente de Torneos (sesión normal, no service_role).
- * Convierte entre las filas de Supabase (snake_case, columnas reales) y los
- * tipos de dominio de tournament-types.ts (camelCase). El resultado de un
- * partido NUNCA se escribe desde acá — eso es exclusivo de
- * escribirResultadoTorneoPartido en tournament-server-fns.ts.
- */
-
-import { supabase } from "@/lib/supabase";
-import { ensureAuthUid } from "@/lib/online/api";
-import { autoLineup } from "@/lib/football/bot";
-import type { Player, MatchSettings, Team } from "@/lib/football/types";
-import type {
-  Tournament,
-  TournamentFormat,
-  TournamentSlot,
-  TournamentFixtureMatch,
-  AiInterventionLevel,
-} from "./tournament-types";
-import {
-  generateRoundRobinFixture,
-  generateBracketFirstRound,
-  totalRondasLiga,
-  totalRondasBracket,
-} from "./tournament-fixture";
-import { computeStandings } from "./tournament-standings";
-
-// ─── Filas crudas de Supabase (snake_case, tal cual las columnas) ───────────
-
-export interface TorneoRow {
-  id: string;
-  nombre: string;
-  formato: TournamentFormat;
-  estado: "armado" | "en_curso" | "finalizado";
-  target_slot_count: number;
-  ronda_actual: number;
-  total_rondas: number;
-  es_online: boolean;
-  codigo_sala: string | null;
-  nivel_ia: AiInterventionLevel | null;
-  modo_horario: "manual" | "automatico_simultaneo" | "automatico_escalonado" | null;
-  horario_aleatorio: boolean;
-  rango_horario_inicio: string | null;
-  rango_horario_fin: string | null;
-  intervalo_horas: number | null;
-  creado_por: string;
-  config_partido: MatchSettings;
-  campeon_slot_id: string | null;
-  creado_en: string;
-  finalizado_en: string | null;
-}
-
-export interface TorneoSlotRow {
-  id: string;
-  torneo_id: string;
-  nombre_visible: string;
-  config_equipo: TournamentSlot["teamConfig"];
-  plantel: Player[];
-  formacion: string;
-  estilo: TournamentSlot["style"];
-  altura_linea: TournamentSlot["lineHeight"];
-  salida: TournamentSlot["buildUp"];
-  presion: TournamentSlot["pressIntensity"];
-  usuario_id: string | null;
-  equipo_guardado_id: string | null;
-  seed: number;
-  titulares: string[] | null;
-  capitan_id: string | null;
-  pateador_penales_id: string | null;
-  pateador_tiros_libres_id: string | null;
-}
-
-export interface TorneoPartidoRow {
-  id: string;
-  torneo_id: string;
-  ronda: number;
-  slot_local_id: string;
-  slot_visitante_id: string;
-  estado: "pendiente" | "en_curso" | "jugado" | "walkover";
-  resultado: TournamentFixtureMatch["result"] | null;
-  partida_online_id: string | null;
-  posicion_bracket: number | null;
-  hora_programada: string | null;
-}
-
-// ─── Conversión fila → tipo de dominio ──────────────────────────────────────
-
-export function rowToTournament(row: TorneoRow): Tournament {
-  return {
-    id: row.id,
-    name: row.nombre,
-    format: row.formato,
-    status: row.estado,
-    slots: [],
-    fixture: [],
-    currentRound: row.ronda_actual,
-    totalRounds: row.total_rondas,
-    isOnline: row.es_online,
-    roomCode: row.codigo_sala ?? undefined,
-    aiInterventionLevel: row.nivel_ia ?? undefined,
-    modoHorario: row.modo_horario ?? undefined,
-    horarioAleatorio: row.horario_aleatorio,
-    rangoHorarioInicio: row.rango_horario_inicio ?? undefined,
-    rangoHorarioFin: row.rango_horario_fin ?? undefined,
-    intervaloHoras: row.intervalo_horas ?? undefined,
-    createdByUserId: row.creado_por,
-    matchSettingsTemplate: row.config_partido,
-    createdAt: row.creado_en,
-    finishedAt: row.finalizado_en ?? undefined,
-    championSlotId: row.campeon_slot_id ?? undefined,
-    targetSlotCount: row.target_slot_count,
-  };
-}
-
-export function rowToSlot(row: TorneoSlotRow): TournamentSlot {
-  return {
-    id: row.id,
-    displayName: row.nombre_visible,
-    teamConfig: row.config_equipo,
-    squad: row.plantel,
-    formation: row.formacion,
-    style: row.estilo,
-    lineHeight: row.altura_linea,
-    buildUp: row.salida,
-    pressIntensity: row.presion,
-    ownerUserId: row.usuario_id ?? undefined,
-    equipoGuardadoId: row.equipo_guardado_id ?? undefined,
-    seed: row.seed,
-    starting: row.titulares ?? undefined,
-    captainId: row.capitan_id ?? undefined,
-    penaltyTakerId: row.pateador_penales_id ?? undefined,
-    setPieceTakerId: row.pateador_tiros_libres_id ?? undefined,
-  };
-}
-
-export function rowToFixtureMatch(row: TorneoPartidoRow): TournamentFixtureMatch {
-  return {
-    id: row.id,
-    round: row.ronda,
-    homeSlotId: row.slot_local_id,
-    awaySlotId: row.slot_visitante_id,
-    status: row.estado,
-    result: row.resultado ?? undefined,
-    partidaOnlineId: row.partida_online_id ?? undefined,
-    bracketPosition: row.posicion_bracket ?? undefined,
-    scheduledAt: row.hora_programada ?? undefined,
-  };
-}
-
-/**
- * Calcula la hora programada de un partido de torneo online: un ancla
- * (normalmente "ahora", el momento en que se genera esa tanda de partidos)
- * más un desplazamiento en horas, y si el torneo tiene horario aleatorio
- * activado, reemplaza la hora del día por un horario al azar dentro del
- * rango configurado (mismo día calculado por el desplazamiento).
- */
-function calcularHoraProgramada(params: {
-  ancla: Date;
-  offsetHoras: number;
-  aleatorio: boolean;
-  rangoInicio?: string | null;
-  rangoFin?: string | null;
-}): Date {
-  const fecha = new Date(params.ancla.getTime() + params.offsetHoras * 60 * 60 * 1000);
-  if (params.aleatorio && params.rangoInicio && params.rangoFin) {
-    const [hIni, mIni] = params.rangoInicio.split(":").map(Number);
-    const [hFin, mFin] = params.rangoFin.split(":").map(Number);
-    const minIni = hIni * 60 + mIni;
-    const minFin = hFin * 60 + mFin;
-    const rango = Math.max(1, minFin - minIni);
-    const minAleatorio = minIni + Math.floor(Math.random() * rango);
-    fecha.setHours(Math.floor(minAleatorio / 60), minAleatorio % 60, 0, 0);
-  }
-  return fecha;
-}
-
-// ─── Crear torneo ────────────────────────────────────────────────────────────
-
-const LETRAS_CODIGO = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
-function generarCodigoAlAzar(): string {
-  let codigo = "";
-  for (let i = 0; i < 6; i++) {
-    codigo += LETRAS_CODIGO[Math.floor(Math.random() * LETRAS_CODIGO.length)];
-  }
-  return codigo;
-}
-
-/** Reintenta hasta encontrar un código de 6 letras que no esté en uso todavía. */
-async function generarCodigoSalaUnico(): Promise<string> {
-  for (let intento = 0; intento < 10; intento++) {
-    const codigo = generarCodigoAlAzar();
-    const { data, error } = await supabase
-      .from("torneos")
-      .select("id")
-      .eq("codigo_sala", codigo)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!data) return codigo;
-  }
-  throw new Error("No se pudo generar un código de sala único. Probá crear el torneo de nuevo.");
-}
-
-export async function crearTorneo(params: {
-  nombre: string;
-  formato: TournamentFormat;
-  targetSlotCount: number;
-  matchSettings: MatchSettings;
-  esOnline?: boolean;
-  modoHorario?: "manual" | "automatico_simultaneo" | "automatico_escalonado";
-  horarioAleatorio?: boolean;
-  rangoHorarioInicio?: string;
-  rangoHorarioFin?: string;
-  intervaloHoras?: number;
-  aiInterventionLevel?: AiInterventionLevel;
-}): Promise<Tournament> {
-  const usuarioId = await ensureAuthUid();
-  const codigoSala = params.esOnline ? await generarCodigoSalaUnico() : null;
-
-  const { data, error } = await supabase
-    .from("torneos")
-    .insert({
-      nombre: params.nombre.trim(),
-      formato: params.formato,
-      target_slot_count: params.targetSlotCount,
-      es_online: params.esOnline ?? false,
-      codigo_sala: codigoSala,
-      creado_por: usuarioId,
-      config_partido: params.matchSettings,
-      modo_horario: params.esOnline ? (params.modoHorario ?? "manual") : null,
-      horario_aleatorio: params.esOnline ? (params.horarioAleatorio ?? false) : false,
-      rango_horario_inicio: params.esOnline && params.horarioAleatorio ? params.rangoHorarioInicio ?? null : null,
-      rango_horario_fin: params.esOnline && params.horarioAleatorio ? params.rangoHorarioFin ?? null : null,
-      intervalo_horas: params.esOnline ? params.intervaloHoras ?? null : null,
-      nivel_ia: params.esOnline ? (params.aiInterventionLevel ?? "ninguna") : null,
-    })
-    .select("*")
-    .single();
-  if (error) throw new Error(error.message);
-  const torneo = rowToTournament(data as TorneoRow);
-
-  if (params.esOnline) {
-    const { error: adminError } = await supabase
-      .from("torneo_admins")
-      .insert({ torneo_id: torneo.id, usuario_id: usuarioId });
-    if (adminError) throw new Error(adminError.message);
-  }
-
-  return torneo;
-}
-
-// ─── Agregar cupos ───────────────────────────────────────────────────────────
-
-export async function agregarSlot(params: {
-  torneoId: string;
-  displayName: string;
-  teamConfig: TournamentSlot["teamConfig"];
-  squad: Player[];
-  formation: string;
-  style: TournamentSlot["style"];
-  lineHeight: TournamentSlot["lineHeight"];
-  buildUp: TournamentSlot["buildUp"];
-  pressIntensity: TournamentSlot["pressIntensity"];
-  ownerUserId?: string;
-  equipoGuardadoId?: string;
-  seed: number;
-}): Promise<TournamentSlot> {
-  const { data, error } = await supabase
-    .from("torneo_slots")
-    .insert({
-      torneo_id: params.torneoId,
-      nombre_visible: params.displayName,
-      config_equipo: params.teamConfig,
-      plantel: params.squad,
-      formacion: params.formation,
-      estilo: params.style,
-      altura_linea: params.lineHeight,
-      salida: params.buildUp,
-      presion: params.pressIntensity,
-      usuario_id: params.ownerUserId ?? null,
-      equipo_guardado_id: params.equipoGuardadoId ?? null,
-      seed: params.seed,
-    })
-    .select("*")
-    .single();
-  if (error) throw new Error(error.message);
-  return rowToSlot(data as TorneoSlotRow);
-}
-
-export async function fetchSlots(torneoId: string): Promise<TournamentSlot[]> {
-  const { data, error } = await supabase
-    .from("torneo_slots")
-    .select("*")
-    .eq("torneo_id", torneoId)
-    .order("seed", { ascending: true });
-  if (error) throw new Error(error.message);
-  return (data ?? []).map((r) => rowToSlot(r as TorneoSlotRow));
-}
-
-/**
- * Actualiza formación/táctica/alineación/capitán/pateadores/roles
- * individuales del propio slot en un torneo. NO permite cambiar la
- * composición del plantel (qué jugadores hay) — eso queda fijo desde que
- * te anotás. `squad` se manda igual porque ahí puede haber cambiado el
- * `individualRole` de algún jugador ya existente.
- */
-export async function actualizarMiSlot(params: {
-  slotId: string;
-  formation: string;
-  style: TournamentSlot["style"];
-  lineHeight: TournamentSlot["lineHeight"];
-  buildUp: TournamentSlot["buildUp"];
-  pressIntensity: TournamentSlot["pressIntensity"];
-  squad: Player[];
-  starting: string[];
-  captainId?: string;
-  penaltyTakerId?: string;
-  setPieceTakerId?: string;
-}): Promise<TournamentSlot> {
-  const { data, error } = await supabase
-    .from("torneo_slots")
-    .update({
-      formacion: params.formation,
-      estilo: params.style,
-      altura_linea: params.lineHeight,
-      salida: params.buildUp,
-      presion: params.pressIntensity,
-      plantel: params.squad,
-      titulares: params.starting,
-      capitan_id: params.captainId ?? null,
-      pateador_penales_id: params.penaltyTakerId ?? null,
-      pateador_tiros_libres_id: params.setPieceTakerId ?? null,
-    })
-    .eq("id", params.slotId)
-    .select("*")
-    .single();
-  if (error) throw new Error(error.message);
-  return rowToSlot(data as TorneoSlotRow);
-}
-
-// ─── Generar fixture y arrancar el torneo ───────────────────────────────────
-
-export async function generarFixtureYArrancar(torneoId: string): Promise<void> {
-  const { data: torneoData, error: torneoError } = await supabase
-    .from("torneos")
-    .select("*")
-    .eq("id", torneoId)
-    .single();
-  if (torneoError) throw new Error(torneoError.message);
-  const torneo = torneoData as TorneoRow;
-
-  const slots = await fetchSlots(torneoId);
-  if (slots.length < 2) {
-    throw new Error("Hacen falta al menos 2 equipos para arrancar el torneo.");
-  }
-
-  const idsPorSeed = [...slots].sort((a, b) => a.seed - b.seed).map((s) => s.id);
-
-  let drafts: ReturnType<typeof generateRoundRobinFixture>;
-  let totalRondas: number;
-  if (torneo.formato === "eliminacion_directa") {
-    drafts = generateBracketFirstRound(idsPorSeed);
-    totalRondas = totalRondasBracket(slots.length);
-  } else {
-    const idaYVuelta = torneo.formato === "liga_ida_vuelta";
-    drafts = generateRoundRobinFixture(idsPorSeed, idaYVuelta);
-    totalRondas = totalRondasLiga(slots.length, idaYVuelta);
-  }
-
-  const ancla = new Date();
-  const filas = drafts.map((d, index) => {
-    let horaProgramada: string | null = null;
-    if (torneo.es_online && torneo.modo_horario && torneo.modo_horario !== "manual") {
-      const offsetHoras =
-        torneo.modo_horario === "automatico_simultaneo"
-          ? (d.round - 1) * (torneo.intervalo_horas ?? 24)
-          : index * (torneo.intervalo_horas ?? 24);
-      horaProgramada = calcularHoraProgramada({
-        ancla,
-        offsetHoras,
-        aleatorio: torneo.horario_aleatorio,
-        rangoInicio: torneo.rango_horario_inicio,
-        rangoFin: torneo.rango_horario_fin,
-      }).toISOString();
-    }
-    return {
-      torneo_id: torneoId,
-      ronda: d.round,
-      slot_local_id: d.homeSlotId,
-      slot_visitante_id: d.awaySlotId,
-      posicion_bracket: d.bracketPosition ?? null,
-      hora_programada: horaProgramada,
-    };
-  });
-
-  const { error: insertError } = await supabase.from("torneo_partidos").insert(filas);
-  if (insertError) throw new Error(insertError.message);
-
-  const { error: updateError } = await supabase
-    .from("torneos")
-    .update({ estado: "en_curso", ronda_actual: 1, total_rondas: totalRondas })
-    .eq("id", torneoId);
-  if (updateError) throw new Error(updateError.message);
-}
-
-export async function fetchFixture(torneoId: string): Promise<TournamentFixtureMatch[]> {
-  const { data, error } = await supabase
-    .from("torneo_partidos")
-    .select("*")
-    .eq("torneo_id", torneoId)
-    .order("ronda", { ascending: true });
-  if (error) throw new Error(error.message);
-  return (data ?? []).map((r) => rowToFixtureMatch(r as TorneoPartidoRow));
-}
-
-/**
- * Reconstruye un Team jugable a partir de un TournamentSlot, preservando la
- * formación/táctica guardadas al anotarse (a diferencia de makeTeamFromSquad,
- * que siempre arranca en 4-4-2/Equilibrado). La alineación titular se
- * recalcula con autoLineup en cada partido, porque TournamentSlot no la
- * guarda — el usuario la puede ajustar en el vestuario antes de jugar.
- */
-export function teamFromSlot(slot: TournamentSlot): Team {
-  const normalizedSquad: Player[] = slot.squad.map((p) => ({
-    ...p,
-    stamina: 100,
-    onField: false,
-    redCarded: false,
-    yellowCards: 0,
-    injured: false,
-    fieldPosition: undefined,
-    slotIndex: undefined,
-  }));
-
-  const squadIds = new Set(normalizedSquad.map((p) => p.id));
-  const startingGuardado =
-    slot.starting && slot.starting.length === 11 && slot.starting.every((id) => squadIds.has(id))
-      ? slot.starting
-      : null;
-  const starting = startingGuardado ?? autoLineup(normalizedSquad, slot.formation);
-  const starters = normalizedSquad.filter((p) => starting.includes(p.id));
-
-  const kicker = starters.length
-    ? [...starters].sort((a, b) => b.shooting - a.shooting)[0]
-    : normalizedSquad[0];
-
-  const captainGuardado =
-    slot.captainId && starters.some((p) => p.id === slot.captainId) ? slot.captainId : undefined;
-  const captain = captainGuardado
-    ? starters.find((p) => p.id === captainGuardado)
-    : starters.length
-      ? starters.reduce((a, b) => (a.overall > b.overall ? a : b), starters[0])
-      : normalizedSquad[0];
-
-  const penaltyGuardado =
-    slot.penaltyTakerId && starters.some((p) => p.id === slot.penaltyTakerId)
-      ? slot.penaltyTakerId
-      : undefined;
-  const setPieceGuardado =
-    slot.setPieceTakerId && starters.some((p) => p.id === slot.setPieceTakerId)
-      ? slot.setPieceTakerId
-      : undefined;
-
-  return {
-    config: slot.teamConfig,
-    squad: normalizedSquad,
-    formation: slot.formation,
-    starting,
-    style: slot.style,
-    lineHeight: slot.lineHeight,
-    buildUp: slot.buildUp,
-    pressIntensity: slot.pressIntensity,
-    captainId: captain?.id,
-    penaltyTakerId: penaltyGuardado ?? kicker?.id,
-    setPieceTakerId: setPieceGuardado ?? kicker?.id,
-    substitutionsLeft: 5,
-    redCards: 0,
-    yellowCards: 0,
-    shots: 0,
-    shotsOnTarget: 0,
-    corners: 0,
-    fouls: 0,
-    possession: 0,
-    goals: 0,
-    xg: 0,
-    saves: 0,
-  };
-}
-
-/**
- * Torneos donde el usuario actual es el creador, MÁS los torneos donde
- * se anotó como participante con su propio equipo (ver 4.4-2b). Se
- * combinan y ordenan por fecha de creación, sin duplicados.
- */
-export async function fetchMisTorneos(): Promise<Tournament[]> {
-  const usuarioId = await ensureAuthUid();
-
-  const { data: creados, error: creadosError } = await supabase
-    .from("torneos")
-    .select("*")
-    .eq("creado_por", usuarioId);
-  if (creadosError) throw new Error(creadosError.message);
-
-  const { data: slotsPropios, error: slotsError } = await supabase
-    .from("torneo_slots")
-    .select("torneo_id")
-    .eq("usuario_id", usuarioId);
-  if (slotsError) throw new Error(slotsError.message);
-
-  const idsYaTraidos = new Set((creados ?? []).map((t) => t.id));
-  const idsFaltantes = [...new Set((slotsPropios ?? []).map((s) => s.torneo_id))].filter(
-    (id) => !idsYaTraidos.has(id),
-  );
-
-  let unidos: TorneoRow[] = [];
-  if (idsFaltantes.length > 0) {
-    const { data, error } = await supabase.from("torneos").select("*").in("id", idsFaltantes);
-    if (error) throw new Error(error.message);
-    unidos = (data ?? []) as TorneoRow[];
-  }
-
-  const todos = [...(creados ?? []), ...unidos] as TorneoRow[];
-  todos.sort((a, b) => (a.creado_en < b.creado_en ? 1 : -1));
-  return todos.map((r) => rowToTournament(r));
-}
-
-export async function fetchTorneo(torneoId: string): Promise<Tournament> {
-  const { data, error } = await supabase
-    .from("torneos")
-    .select("*")
-    .eq("id", torneoId)
-    .single();
-  if (error) throw new Error(error.message);
-  return rowToTournament(data as TorneoRow);
-}
-
-/** Busca un torneo por su código de sala de 6 letras (no distingue mayúsculas/minúsculas). */
-export async function fetchTorneoPorCodigo(codigo: string): Promise<Tournament> {
-  const { data, error } = await supabase
-    .from("torneos")
-    .select("*")
-    .eq("codigo_sala", codigo.trim().toUpperCase())
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("No existe ningún torneo con ese código.");
-  return rowToTournament(data as TorneoRow);
-}
-
-/**
- * Se une a un torneo online existente usando su código de sala, anotando el
- * equipo del usuario actual como un slot nuevo. Valida que el torneo sea
- * online, que todavía esté "armado" (no arrancado), y que el usuario no
- * tenga ya un equipo anotado en ese mismo torneo.
- */
-export async function unirseATorneoConCodigo(params: {
-  codigo: string;
-  displayName: string;
-  teamConfig: TournamentSlot["teamConfig"];
-  squad: Player[];
-  formation: string;
-  style: TournamentSlot["style"];
-  lineHeight: TournamentSlot["lineHeight"];
-  buildUp: TournamentSlot["buildUp"];
-  pressIntensity: TournamentSlot["pressIntensity"];
-}): Promise<{ torneo: Tournament; slot: TournamentSlot }> {
-  const usuarioId = await ensureAuthUid();
-  const torneo = await fetchTorneoPorCodigo(params.codigo);
-
-  if (!torneo.isOnline) {
-    throw new Error("Ese código no corresponde a un torneo online.");
-  }
-  if (torneo.status !== "armado") {
-    throw new Error("Ese torneo ya arrancó o ya terminó — no se pueden sumar más equipos.");
-  }
-
-  const slotsActuales = await fetchSlots(torneo.id);
-  if (slotsActuales.some((s) => s.ownerUserId === usuarioId)) {
-    throw new Error("Ya tenés un equipo anotado en este torneo.");
-  }
-
-  const slot = await agregarSlot({
-    torneoId: torneo.id,
-    displayName: params.displayName,
-    teamConfig: params.teamConfig,
-    squad: params.squad,
-    formation: params.formation,
-    style: params.style,
-    lineHeight: params.lineHeight,
-    buildUp: params.buildUp,
-    pressIntensity: params.pressIntensity,
-    ownerUserId: usuarioId,
-    seed: slotsActuales.length,
-  });
-
-  return { torneo, slot };
-}
-
-function ganadorDe(m: TournamentFixtureMatch): string {
-  if (!m.result) throw new Error("No se puede determinar el ganador de un partido sin resultado.");
-  if (m.result.penalties) {
-    return m.result.penalties.homeGoals > m.result.penalties.awayGoals ? m.homeSlotId : m.awaySlotId;
-  }
-  return m.result.homeGoals >= m.result.awayGoals ? m.homeSlotId : m.awaySlotId;
-}
-
-/**
- * Solo aplica a Eliminación directa. Revisa si todos los partidos de la
- * ronda actual del torneo ya están jugados; si es así, genera los cruces
- * de la siguiente ronda emparejando ganadores por posición de bracket, o
- * si solo queda un ganador, declara campeón y cierra el torneo.
- * Idempotente: si se llama de nuevo sin cambios, no hace nada (porque ya
- * no quedan partidos "pendiente" en la ronda actual la próxima vez que
- * se revise, dado que la ronda ya avanzó).
- */
-export async function avanzarRondaSiCorresponde(torneoId: string): Promise<void> {
-  const torneo = await fetchTorneo(torneoId);
-  if (torneo.format !== "eliminacion_directa" || torneo.status === "finalizado") return;
-
-  const fixture = await fetchFixture(torneoId);
-  const partidosRonda = fixture.filter((m) => m.round === torneo.currentRound);
-  if (partidosRonda.length === 0) return;
-  const todosResueltos = partidosRonda.every((m) => m.status === "jugado" || m.status === "walkover");
-  if (!todosResueltos) return;
-
-  const ordenados = [...partidosRonda].sort(
-    (a, b) => (a.bracketPosition ?? 0) - (b.bracketPosition ?? 0),
-  );
-  const ganadores = ordenados.map(ganadorDe);
-
-  if (ganadores.length === 1) {
-    const { error } = await supabase
-      .from("torneos")
-      .update({
-        estado: "finalizado",
-        campeon_slot_id: ganadores[0],
-        finalizado_en: new Date().toISOString(),
-      })
-      .eq("id", torneoId);
-    if (error) throw new Error(error.message);
-    return;
-  }
-
-  const nuevaRonda = torneo.currentRound + 1;
-  const anclaNuevaRonda = new Date();
-  const filas = [];
-  for (let i = 0; i < ganadores.length / 2; i++) {
-    let horaProgramada: string | null = null;
-    if (torneo.isOnline && torneo.modoHorario && torneo.modoHorario !== "manual") {
-      const offsetHoras =
-        torneo.modoHorario === "automatico_simultaneo"
-          ? (torneo.intervaloHoras ?? 24)
-          : (i + 1) * (torneo.intervaloHoras ?? 24);
-      horaProgramada = calcularHoraProgramada({
-        ancla: anclaNuevaRonda,
-        offsetHoras,
-        aleatorio: torneo.horarioAleatorio ?? false,
-        rangoInicio: torneo.rangoHorarioInicio,
-        rangoFin: torneo.rangoHorarioFin,
-      }).toISOString();
-    }
-    filas.push({
-      torneo_id: torneoId,
-      ronda: nuevaRonda,
-      slot_local_id: ganadores[i * 2],
-      slot_visitante_id: ganadores[i * 2 + 1],
-      posicion_bracket: i,
-      hora_programada: horaProgramada,
-    });
-  }
-
-  const { error: insertError } = await supabase.from("torneo_partidos").insert(filas);
-  if (insertError) throw new Error(insertError.message);
-
-  const { error: updateError } = await supabase
-    .from("torneos")
-    .update({ ronda_actual: nuevaRonda })
-    .eq("id", torneoId);
-  if (updateError) throw new Error(updateError.message);
-}
-
-/**
- * Solo aplica a formatos de Liga (simple o ida y vuelta). Revisa si todos
- * los partidos del fixture ya están resueltos; si es así, declara campeón
- * al primero de la tabla de posiciones (mismo criterio de desempate que
- * computeStandings: puntos, luego diferencia de gol, luego goles a favor)
- * y cierra el torneo. Idempotente por el mismo motivo que
- * avanzarRondaSiCorresponde: no hace nada si ya estaba finalizado.
- */
-export async function finalizarLigaSiCorresponde(torneoId: string): Promise<void> {
-  const torneo = await fetchTorneo(torneoId);
-  if (torneo.format === "eliminacion_directa" || torneo.status === "finalizado") return;
-
-  const fixture = await fetchFixture(torneoId);
-  if (fixture.length === 0) return;
-  const todosResueltos = fixture.every((m) => m.status === "jugado" || m.status === "walkover");
-  if (!todosResueltos) return;
-
-  const slots = await fetchSlots(torneoId);
-  const standings = computeStandings(slots, fixture);
-  const campeonId = standings[0]?.slotId ?? null;
-
-  const { error } = await supabase
-    .from("torneos")
-    .update({
-      estado: "finalizado",
-      campeon_slot_id: campeonId,
-      finalizado_en: new Date().toISOString(),
-    })
-    .eq("id", torneoId);
-  if (error) throw new Error(error.message);
-}
-</file>
-
 <file path="src/components/online/OnlineLockerScreen.tsx">
 'use client';
 /**
@@ -18633,6 +18491,759 @@ function IndividualRoles({
 }
 </file>
 
+<file path="src/lib/football/tournament-api.ts">
+'use client';
+/**
+ * tournament-api.ts — helpers cliente de Torneos (sesión normal, no service_role).
+ * Convierte entre las filas de Supabase (snake_case, columnas reales) y los
+ * tipos de dominio de tournament-types.ts (camelCase). El resultado de un
+ * partido NUNCA se escribe desde acá — eso es exclusivo de
+ * escribirResultadoTorneoPartido en tournament-server-fns.ts.
+ */
+
+import { supabase } from "@/lib/supabase";
+import { ensureAuthUid } from "@/lib/online/api";
+import { autoLineup } from "@/lib/football/bot";
+import type { Player, MatchSettings, Team } from "@/lib/football/types";
+import type {
+  Tournament,
+  TournamentFormat,
+  TournamentSlot,
+  TournamentFixtureMatch,
+  AiInterventionLevel,
+} from "./tournament-types";
+import {
+  generateRoundRobinFixture,
+  generateBracketFirstRound,
+  totalRondasLiga,
+  totalRondasBracket,
+} from "./tournament-fixture";
+import { computeStandings } from "./tournament-standings";
+
+// ─── Filas crudas de Supabase (snake_case, tal cual las columnas) ───────────
+
+export interface TorneoRow {
+  id: string;
+  nombre: string;
+  formato: TournamentFormat;
+  estado: "armado" | "en_curso" | "finalizado";
+  target_slot_count: number;
+  ronda_actual: number;
+  total_rondas: number;
+  es_online: boolean;
+  codigo_sala: string | null;
+  nivel_ia: AiInterventionLevel | null;
+  modo_horario: "manual" | "automatico_simultaneo" | "automatico_escalonado" | null;
+  horario_aleatorio: boolean;
+  rango_horario_inicio: string | null;
+  rango_horario_fin: string | null;
+  intervalo_horas: number | null;
+  creado_por: string;
+  config_partido: MatchSettings;
+  campeon_slot_id: string | null;
+  creado_en: string;
+  finalizado_en: string | null;
+}
+
+export interface TorneoSlotRow {
+  id: string;
+  torneo_id: string;
+  nombre_visible: string;
+  config_equipo: TournamentSlot["teamConfig"];
+  plantel: Player[];
+  formacion: string;
+  estilo: TournamentSlot["style"];
+  altura_linea: TournamentSlot["lineHeight"];
+  salida: TournamentSlot["buildUp"];
+  presion: TournamentSlot["pressIntensity"];
+  usuario_id: string | null;
+  equipo_guardado_id: string | null;
+  seed: number;
+  titulares: string[] | null;
+  capitan_id: string | null;
+  pateador_penales_id: string | null;
+  pateador_tiros_libres_id: string | null;
+}
+
+export interface TorneoPartidoRow {
+  id: string;
+  torneo_id: string;
+  ronda: number;
+  slot_local_id: string;
+  slot_visitante_id: string;
+  estado: "pendiente" | "en_curso" | "jugado" | "walkover";
+  resultado: TournamentFixtureMatch["result"] | null;
+  partida_online_id: string | null;
+  posicion_bracket: number | null;
+  hora_programada: string | null;
+}
+
+// ─── Conversión fila → tipo de dominio ──────────────────────────────────────
+
+export function rowToTournament(row: TorneoRow): Tournament {
+  return {
+    id: row.id,
+    name: row.nombre,
+    format: row.formato,
+    status: row.estado,
+    slots: [],
+    fixture: [],
+    currentRound: row.ronda_actual,
+    totalRounds: row.total_rondas,
+    isOnline: row.es_online,
+    roomCode: row.codigo_sala ?? undefined,
+    aiInterventionLevel: row.nivel_ia ?? undefined,
+    modoHorario: row.modo_horario ?? undefined,
+    horarioAleatorio: row.horario_aleatorio,
+    rangoHorarioInicio: row.rango_horario_inicio ?? undefined,
+    rangoHorarioFin: row.rango_horario_fin ?? undefined,
+    intervaloHoras: row.intervalo_horas ?? undefined,
+    createdByUserId: row.creado_por,
+    matchSettingsTemplate: row.config_partido,
+    createdAt: row.creado_en,
+    finishedAt: row.finalizado_en ?? undefined,
+    championSlotId: row.campeon_slot_id ?? undefined,
+    targetSlotCount: row.target_slot_count,
+  };
+}
+
+export function rowToSlot(row: TorneoSlotRow): TournamentSlot {
+  return {
+    id: row.id,
+    displayName: row.nombre_visible,
+    teamConfig: row.config_equipo,
+    squad: row.plantel,
+    formation: row.formacion,
+    style: row.estilo,
+    lineHeight: row.altura_linea,
+    buildUp: row.salida,
+    pressIntensity: row.presion,
+    ownerUserId: row.usuario_id ?? undefined,
+    equipoGuardadoId: row.equipo_guardado_id ?? undefined,
+    seed: row.seed,
+    starting: row.titulares ?? undefined,
+    captainId: row.capitan_id ?? undefined,
+    penaltyTakerId: row.pateador_penales_id ?? undefined,
+    setPieceTakerId: row.pateador_tiros_libres_id ?? undefined,
+  };
+}
+
+export function rowToFixtureMatch(row: TorneoPartidoRow): TournamentFixtureMatch {
+  return {
+    id: row.id,
+    round: row.ronda,
+    homeSlotId: row.slot_local_id,
+    awaySlotId: row.slot_visitante_id,
+    status: row.estado,
+    result: row.resultado ?? undefined,
+    partidaOnlineId: row.partida_online_id ?? undefined,
+    bracketPosition: row.posicion_bracket ?? undefined,
+    scheduledAt: row.hora_programada ?? undefined,
+  };
+}
+
+/**
+ * Calcula la hora programada de un partido de torneo online: un ancla
+ * (normalmente "ahora", el momento en que se genera esa tanda de partidos)
+ * más un desplazamiento en horas, y si el torneo tiene horario aleatorio
+ * activado, reemplaza la hora del día por un horario al azar dentro del
+ * rango configurado (mismo día calculado por el desplazamiento).
+ */
+function calcularHoraProgramada(params: {
+  ancla: Date;
+  offsetHoras: number;
+  aleatorio: boolean;
+  rangoInicio?: string | null;
+  rangoFin?: string | null;
+}): Date {
+  const fecha = new Date(params.ancla.getTime() + params.offsetHoras * 60 * 60 * 1000);
+  if (params.aleatorio && params.rangoInicio && params.rangoFin) {
+    const [hIni, mIni] = params.rangoInicio.split(":").map(Number);
+    const [hFin, mFin] = params.rangoFin.split(":").map(Number);
+    const minIni = hIni * 60 + mIni;
+    const minFin = hFin * 60 + mFin;
+    const rango = Math.max(1, minFin - minIni);
+    const minAleatorio = minIni + Math.floor(Math.random() * rango);
+    fecha.setHours(Math.floor(minAleatorio / 60), minAleatorio % 60, 0, 0);
+  }
+  return fecha;
+}
+
+// ─── Crear torneo ────────────────────────────────────────────────────────────
+
+const LETRAS_CODIGO = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+function generarCodigoAlAzar(): string {
+  let codigo = "";
+  for (let i = 0; i < 6; i++) {
+    codigo += LETRAS_CODIGO[Math.floor(Math.random() * LETRAS_CODIGO.length)];
+  }
+  return codigo;
+}
+
+/** Reintenta hasta encontrar un código de 6 letras que no esté en uso todavía. */
+async function generarCodigoSalaUnico(): Promise<string> {
+  for (let intento = 0; intento < 10; intento++) {
+    const codigo = generarCodigoAlAzar();
+    const { data, error } = await supabase
+      .from("torneos")
+      .select("id")
+      .eq("codigo_sala", codigo)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) return codigo;
+  }
+  throw new Error("No se pudo generar un código de sala único. Probá crear el torneo de nuevo.");
+}
+
+export async function crearTorneo(params: {
+  nombre: string;
+  formato: TournamentFormat;
+  targetSlotCount: number;
+  matchSettings: MatchSettings;
+  esOnline?: boolean;
+  modoHorario?: "manual" | "automatico_simultaneo" | "automatico_escalonado";
+  horarioAleatorio?: boolean;
+  rangoHorarioInicio?: string;
+  rangoHorarioFin?: string;
+  intervaloHoras?: number;
+  aiInterventionLevel?: AiInterventionLevel;
+}): Promise<Tournament> {
+  const usuarioId = await ensureAuthUid();
+  const codigoSala = params.esOnline ? await generarCodigoSalaUnico() : null;
+
+  const { data, error } = await supabase
+    .from("torneos")
+    .insert({
+      nombre: params.nombre.trim(),
+      formato: params.formato,
+      target_slot_count: params.targetSlotCount,
+      es_online: params.esOnline ?? false,
+      codigo_sala: codigoSala,
+      creado_por: usuarioId,
+      config_partido: params.matchSettings,
+      modo_horario: params.esOnline ? (params.modoHorario ?? "manual") : null,
+      horario_aleatorio: params.esOnline ? (params.horarioAleatorio ?? false) : false,
+      rango_horario_inicio: params.esOnline && params.horarioAleatorio ? params.rangoHorarioInicio ?? null : null,
+      rango_horario_fin: params.esOnline && params.horarioAleatorio ? params.rangoHorarioFin ?? null : null,
+      intervalo_horas: params.esOnline ? params.intervaloHoras ?? null : null,
+      nivel_ia: params.esOnline ? (params.aiInterventionLevel ?? "ninguna") : null,
+    })
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  const torneo = rowToTournament(data as TorneoRow);
+
+  if (params.esOnline) {
+    const { error: adminError } = await supabase
+      .from("torneo_admins")
+      .insert({ torneo_id: torneo.id, usuario_id: usuarioId });
+    if (adminError) throw new Error(adminError.message);
+  }
+
+  return torneo;
+}
+
+// ─── Agregar cupos ───────────────────────────────────────────────────────────
+
+export async function agregarSlot(params: {
+  torneoId: string;
+  displayName: string;
+  teamConfig: TournamentSlot["teamConfig"];
+  squad: Player[];
+  formation: string;
+  style: TournamentSlot["style"];
+  lineHeight: TournamentSlot["lineHeight"];
+  buildUp: TournamentSlot["buildUp"];
+  pressIntensity: TournamentSlot["pressIntensity"];
+  ownerUserId?: string;
+  equipoGuardadoId?: string;
+  seed: number;
+}): Promise<TournamentSlot> {
+  const { data, error } = await supabase
+    .from("torneo_slots")
+    .insert({
+      torneo_id: params.torneoId,
+      nombre_visible: params.displayName,
+      config_equipo: params.teamConfig,
+      plantel: params.squad,
+      formacion: params.formation,
+      estilo: params.style,
+      altura_linea: params.lineHeight,
+      salida: params.buildUp,
+      presion: params.pressIntensity,
+      usuario_id: params.ownerUserId ?? null,
+      equipo_guardado_id: params.equipoGuardadoId ?? null,
+      seed: params.seed,
+    })
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return rowToSlot(data as TorneoSlotRow);
+}
+
+export async function fetchSlots(torneoId: string): Promise<TournamentSlot[]> {
+  const { data, error } = await supabase
+    .from("torneo_slots")
+    .select("*")
+    .eq("torneo_id", torneoId)
+    .order("seed", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => rowToSlot(r as TorneoSlotRow));
+}
+
+/**
+ * Actualiza formación/táctica/alineación/capitán/pateadores/roles
+ * individuales del propio slot en un torneo. NO permite cambiar la
+ * composición del plantel (qué jugadores hay) — eso queda fijo desde que
+ * te anotás. `squad` se manda igual porque ahí puede haber cambiado el
+ * `individualRole` de algún jugador ya existente.
+ */
+export async function actualizarMiSlot(params: {
+  slotId: string;
+  formation: string;
+  style: TournamentSlot["style"];
+  lineHeight: TournamentSlot["lineHeight"];
+  buildUp: TournamentSlot["buildUp"];
+  pressIntensity: TournamentSlot["pressIntensity"];
+  squad: Player[];
+  starting: string[];
+  captainId?: string;
+  penaltyTakerId?: string;
+  setPieceTakerId?: string;
+}): Promise<TournamentSlot> {
+  const { data, error } = await supabase
+    .from("torneo_slots")
+    .update({
+      formacion: params.formation,
+      estilo: params.style,
+      altura_linea: params.lineHeight,
+      salida: params.buildUp,
+      presion: params.pressIntensity,
+      plantel: params.squad,
+      titulares: params.starting,
+      capitan_id: params.captainId ?? null,
+      pateador_penales_id: params.penaltyTakerId ?? null,
+      pateador_tiros_libres_id: params.setPieceTakerId ?? null,
+    })
+    .eq("id", params.slotId)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return rowToSlot(data as TorneoSlotRow);
+}
+
+// ─── Generar fixture y arrancar el torneo ───────────────────────────────────
+
+export async function generarFixtureYArrancar(torneoId: string): Promise<void> {
+  const { data: torneoData, error: torneoError } = await supabase
+    .from("torneos")
+    .select("*")
+    .eq("id", torneoId)
+    .single();
+  if (torneoError) throw new Error(torneoError.message);
+  const torneo = torneoData as TorneoRow;
+
+  const slots = await fetchSlots(torneoId);
+  if (slots.length < 2) {
+    throw new Error("Hacen falta al menos 2 equipos para arrancar el torneo.");
+  }
+
+  const idsPorSeed = [...slots].sort((a, b) => a.seed - b.seed).map((s) => s.id);
+
+  let drafts: ReturnType<typeof generateRoundRobinFixture>;
+  let totalRondas: number;
+  if (torneo.formato === "eliminacion_directa") {
+    drafts = generateBracketFirstRound(idsPorSeed);
+    totalRondas = totalRondasBracket(slots.length);
+  } else {
+    const idaYVuelta = torneo.formato === "liga_ida_vuelta";
+    drafts = generateRoundRobinFixture(idsPorSeed, idaYVuelta);
+    totalRondas = totalRondasLiga(slots.length, idaYVuelta);
+  }
+
+  const ancla = new Date();
+  const filas = drafts.map((d, index) => {
+    let horaProgramada: string | null = null;
+    if (torneo.es_online && torneo.modo_horario && torneo.modo_horario !== "manual") {
+      const offsetHoras =
+        torneo.modo_horario === "automatico_simultaneo"
+          ? (d.round - 1) * (torneo.intervalo_horas ?? 24)
+          : index * (torneo.intervalo_horas ?? 24);
+      horaProgramada = calcularHoraProgramada({
+        ancla,
+        offsetHoras,
+        aleatorio: torneo.horario_aleatorio,
+        rangoInicio: torneo.rango_horario_inicio,
+        rangoFin: torneo.rango_horario_fin,
+      }).toISOString();
+    }
+    return {
+      torneo_id: torneoId,
+      ronda: d.round,
+      slot_local_id: d.homeSlotId,
+      slot_visitante_id: d.awaySlotId,
+      posicion_bracket: d.bracketPosition ?? null,
+      hora_programada: horaProgramada,
+    };
+  });
+
+  const { error: insertError } = await supabase.from("torneo_partidos").insert(filas);
+  if (insertError) throw new Error(insertError.message);
+
+  const { error: updateError } = await supabase
+    .from("torneos")
+    .update({ estado: "en_curso", ronda_actual: 1, total_rondas: totalRondas })
+    .eq("id", torneoId);
+  if (updateError) throw new Error(updateError.message);
+}
+
+/** Trae un único partido de torneo por su id — para pantallas que solo necesitan seguir uno. */
+export async function fetchTorneoPartido(torneoPartidoId: string): Promise<TournamentFixtureMatch> {
+  const { data, error } = await supabase
+    .from("torneo_partidos")
+    .select("*")
+    .eq("id", torneoPartidoId)
+    .single();
+  if (error) throw new Error(error.message);
+  return rowToFixtureMatch(data as TorneoPartidoRow);
+}
+
+/**
+ * Asigna o cambia el horario de un partido de torneo online en modo manual.
+ * Protegido por RLS: solo un admin del torneo puede hacerlo, y solo si el
+ * partido todavía está pendiente (ver migración
+ * 20260808213000_torneo_partidos_update_horario_admin.sql).
+ */
+export async function asignarHoraPartido(torneoPartidoId: string, fechaHoraISO: string): Promise<void> {
+  const { error } = await supabase
+    .from("torneo_partidos")
+    .update({ hora_programada: fechaHoraISO })
+    .eq("id", torneoPartidoId);
+  if (error) throw new Error(error.message);
+}
+
+/** Verifica si el usuario actual es admin del torneo dado. */
+export async function esAdminDeTorneo(torneoId: string): Promise<boolean> {
+  const usuarioId = await ensureAuthUid();
+  const { data, error } = await supabase
+    .from("torneo_admins")
+    .select("usuario_id")
+    .eq("torneo_id", torneoId)
+    .eq("usuario_id", usuarioId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return !!data;
+}
+
+export async function fetchFixture(torneoId: string): Promise<TournamentFixtureMatch[]> {
+  const { data, error } = await supabase
+    .from("torneo_partidos")
+    .select("*")
+    .eq("torneo_id", torneoId)
+    .order("ronda", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => rowToFixtureMatch(r as TorneoPartidoRow));
+}
+
+/**
+ * Reconstruye un Team jugable a partir de un TournamentSlot, preservando la
+ * formación/táctica guardadas al anotarse (a diferencia de makeTeamFromSquad,
+ * que siempre arranca en 4-4-2/Equilibrado). La alineación titular se
+ * recalcula con autoLineup en cada partido, porque TournamentSlot no la
+ * guarda — el usuario la puede ajustar en el vestuario antes de jugar.
+ */
+export function teamFromSlot(slot: TournamentSlot): Team {
+  const normalizedSquad: Player[] = slot.squad.map((p) => ({
+    ...p,
+    stamina: 100,
+    onField: false,
+    redCarded: false,
+    yellowCards: 0,
+    injured: false,
+    fieldPosition: undefined,
+    slotIndex: undefined,
+  }));
+
+  const squadIds = new Set(normalizedSquad.map((p) => p.id));
+  const startingGuardado =
+    slot.starting && slot.starting.length === 11 && slot.starting.every((id) => squadIds.has(id))
+      ? slot.starting
+      : null;
+  const starting = startingGuardado ?? autoLineup(normalizedSquad, slot.formation);
+  const starters = normalizedSquad.filter((p) => starting.includes(p.id));
+
+  const kicker = starters.length
+    ? [...starters].sort((a, b) => b.shooting - a.shooting)[0]
+    : normalizedSquad[0];
+
+  const captainGuardado =
+    slot.captainId && starters.some((p) => p.id === slot.captainId) ? slot.captainId : undefined;
+  const captain = captainGuardado
+    ? starters.find((p) => p.id === captainGuardado)
+    : starters.length
+      ? starters.reduce((a, b) => (a.overall > b.overall ? a : b), starters[0])
+      : normalizedSquad[0];
+
+  const penaltyGuardado =
+    slot.penaltyTakerId && starters.some((p) => p.id === slot.penaltyTakerId)
+      ? slot.penaltyTakerId
+      : undefined;
+  const setPieceGuardado =
+    slot.setPieceTakerId && starters.some((p) => p.id === slot.setPieceTakerId)
+      ? slot.setPieceTakerId
+      : undefined;
+
+  return {
+    config: slot.teamConfig,
+    squad: normalizedSquad,
+    formation: slot.formation,
+    starting,
+    style: slot.style,
+    lineHeight: slot.lineHeight,
+    buildUp: slot.buildUp,
+    pressIntensity: slot.pressIntensity,
+    captainId: captain?.id,
+    penaltyTakerId: penaltyGuardado ?? kicker?.id,
+    setPieceTakerId: setPieceGuardado ?? kicker?.id,
+    substitutionsLeft: 5,
+    redCards: 0,
+    yellowCards: 0,
+    shots: 0,
+    shotsOnTarget: 0,
+    corners: 0,
+    fouls: 0,
+    possession: 0,
+    goals: 0,
+    xg: 0,
+    saves: 0,
+  };
+}
+
+/**
+ * Torneos donde el usuario actual es el creador, MÁS los torneos donde
+ * se anotó como participante con su propio equipo (ver 4.4-2b). Se
+ * combinan y ordenan por fecha de creación, sin duplicados.
+ */
+export async function fetchMisTorneos(): Promise<Tournament[]> {
+  const usuarioId = await ensureAuthUid();
+
+  const { data: creados, error: creadosError } = await supabase
+    .from("torneos")
+    .select("*")
+    .eq("creado_por", usuarioId);
+  if (creadosError) throw new Error(creadosError.message);
+
+  const { data: slotsPropios, error: slotsError } = await supabase
+    .from("torneo_slots")
+    .select("torneo_id")
+    .eq("usuario_id", usuarioId);
+  if (slotsError) throw new Error(slotsError.message);
+
+  const idsYaTraidos = new Set((creados ?? []).map((t) => t.id));
+  const idsFaltantes = [...new Set((slotsPropios ?? []).map((s) => s.torneo_id))].filter(
+    (id) => !idsYaTraidos.has(id),
+  );
+
+  let unidos: TorneoRow[] = [];
+  if (idsFaltantes.length > 0) {
+    const { data, error } = await supabase.from("torneos").select("*").in("id", idsFaltantes);
+    if (error) throw new Error(error.message);
+    unidos = (data ?? []) as TorneoRow[];
+  }
+
+  const todos = [...(creados ?? []), ...unidos] as TorneoRow[];
+  todos.sort((a, b) => (a.creado_en < b.creado_en ? 1 : -1));
+  return todos.map((r) => rowToTournament(r));
+}
+
+export async function fetchTorneo(torneoId: string): Promise<Tournament> {
+  const { data, error } = await supabase
+    .from("torneos")
+    .select("*")
+    .eq("id", torneoId)
+    .single();
+  if (error) throw new Error(error.message);
+  return rowToTournament(data as TorneoRow);
+}
+
+/** Busca un torneo por su código de sala de 6 letras (no distingue mayúsculas/minúsculas). */
+export async function fetchTorneoPorCodigo(codigo: string): Promise<Tournament> {
+  const { data, error } = await supabase
+    .from("torneos")
+    .select("*")
+    .eq("codigo_sala", codigo.trim().toUpperCase())
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("No existe ningún torneo con ese código.");
+  return rowToTournament(data as TorneoRow);
+}
+
+/**
+ * Se une a un torneo online existente usando su código de sala, anotando el
+ * equipo del usuario actual como un slot nuevo. Valida que el torneo sea
+ * online, que todavía esté "armado" (no arrancado), y que el usuario no
+ * tenga ya un equipo anotado en ese mismo torneo.
+ */
+export async function unirseATorneoConCodigo(params: {
+  codigo: string;
+  displayName: string;
+  teamConfig: TournamentSlot["teamConfig"];
+  squad: Player[];
+  formation: string;
+  style: TournamentSlot["style"];
+  lineHeight: TournamentSlot["lineHeight"];
+  buildUp: TournamentSlot["buildUp"];
+  pressIntensity: TournamentSlot["pressIntensity"];
+}): Promise<{ torneo: Tournament; slot: TournamentSlot }> {
+  const usuarioId = await ensureAuthUid();
+  const torneo = await fetchTorneoPorCodigo(params.codigo);
+
+  if (!torneo.isOnline) {
+    throw new Error("Ese código no corresponde a un torneo online.");
+  }
+  if (torneo.status !== "armado") {
+    throw new Error("Ese torneo ya arrancó o ya terminó — no se pueden sumar más equipos.");
+  }
+
+  const slotsActuales = await fetchSlots(torneo.id);
+  if (slotsActuales.some((s) => s.ownerUserId === usuarioId)) {
+    throw new Error("Ya tenés un equipo anotado en este torneo.");
+  }
+
+  const slot = await agregarSlot({
+    torneoId: torneo.id,
+    displayName: params.displayName,
+    teamConfig: params.teamConfig,
+    squad: params.squad,
+    formation: params.formation,
+    style: params.style,
+    lineHeight: params.lineHeight,
+    buildUp: params.buildUp,
+    pressIntensity: params.pressIntensity,
+    ownerUserId: usuarioId,
+    seed: slotsActuales.length,
+  });
+
+  return { torneo, slot };
+}
+
+function ganadorDe(m: TournamentFixtureMatch): string {
+  if (!m.result) throw new Error("No se puede determinar el ganador de un partido sin resultado.");
+  if (m.result.penalties) {
+    return m.result.penalties.homeGoals > m.result.penalties.awayGoals ? m.homeSlotId : m.awaySlotId;
+  }
+  return m.result.homeGoals >= m.result.awayGoals ? m.homeSlotId : m.awaySlotId;
+}
+
+/**
+ * Solo aplica a Eliminación directa. Revisa si todos los partidos de la
+ * ronda actual del torneo ya están jugados; si es así, genera los cruces
+ * de la siguiente ronda emparejando ganadores por posición de bracket, o
+ * si solo queda un ganador, declara campeón y cierra el torneo.
+ * Idempotente: si se llama de nuevo sin cambios, no hace nada (porque ya
+ * no quedan partidos "pendiente" en la ronda actual la próxima vez que
+ * se revise, dado que la ronda ya avanzó).
+ */
+export async function avanzarRondaSiCorresponde(torneoId: string): Promise<void> {
+  const torneo = await fetchTorneo(torneoId);
+  if (torneo.format !== "eliminacion_directa" || torneo.status === "finalizado") return;
+
+  const fixture = await fetchFixture(torneoId);
+  const partidosRonda = fixture.filter((m) => m.round === torneo.currentRound);
+  if (partidosRonda.length === 0) return;
+  const todosResueltos = partidosRonda.every((m) => m.status === "jugado" || m.status === "walkover");
+  if (!todosResueltos) return;
+
+  const ordenados = [...partidosRonda].sort(
+    (a, b) => (a.bracketPosition ?? 0) - (b.bracketPosition ?? 0),
+  );
+  const ganadores = ordenados.map(ganadorDe);
+
+  if (ganadores.length === 1) {
+    const { error } = await supabase
+      .from("torneos")
+      .update({
+        estado: "finalizado",
+        campeon_slot_id: ganadores[0],
+        finalizado_en: new Date().toISOString(),
+      })
+      .eq("id", torneoId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  const nuevaRonda = torneo.currentRound + 1;
+  const anclaNuevaRonda = new Date();
+  const filas = [];
+  for (let i = 0; i < ganadores.length / 2; i++) {
+    let horaProgramada: string | null = null;
+    if (torneo.isOnline && torneo.modoHorario && torneo.modoHorario !== "manual") {
+      const offsetHoras =
+        torneo.modoHorario === "automatico_simultaneo"
+          ? (torneo.intervaloHoras ?? 24)
+          : (i + 1) * (torneo.intervaloHoras ?? 24);
+      horaProgramada = calcularHoraProgramada({
+        ancla: anclaNuevaRonda,
+        offsetHoras,
+        aleatorio: torneo.horarioAleatorio ?? false,
+        rangoInicio: torneo.rangoHorarioInicio,
+        rangoFin: torneo.rangoHorarioFin,
+      }).toISOString();
+    }
+    filas.push({
+      torneo_id: torneoId,
+      ronda: nuevaRonda,
+      slot_local_id: ganadores[i * 2],
+      slot_visitante_id: ganadores[i * 2 + 1],
+      posicion_bracket: i,
+      hora_programada: horaProgramada,
+    });
+  }
+
+  const { error: insertError } = await supabase.from("torneo_partidos").insert(filas);
+  if (insertError) throw new Error(insertError.message);
+
+  const { error: updateError } = await supabase
+    .from("torneos")
+    .update({ ronda_actual: nuevaRonda })
+    .eq("id", torneoId);
+  if (updateError) throw new Error(updateError.message);
+}
+
+/**
+ * Solo aplica a formatos de Liga (simple o ida y vuelta). Revisa si todos
+ * los partidos del fixture ya están resueltos; si es así, declara campeón
+ * al primero de la tabla de posiciones (mismo criterio de desempate que
+ * computeStandings: puntos, luego diferencia de gol, luego goles a favor)
+ * y cierra el torneo. Idempotente por el mismo motivo que
+ * avanzarRondaSiCorresponde: no hace nada si ya estaba finalizado.
+ */
+export async function finalizarLigaSiCorresponde(torneoId: string): Promise<void> {
+  const torneo = await fetchTorneo(torneoId);
+  if (torneo.format === "eliminacion_directa" || torneo.status === "finalizado") return;
+
+  const fixture = await fetchFixture(torneoId);
+  if (fixture.length === 0) return;
+  const todosResueltos = fixture.every((m) => m.status === "jugado" || m.status === "walkover");
+  if (!todosResueltos) return;
+
+  const slots = await fetchSlots(torneoId);
+  const standings = computeStandings(slots, fixture);
+  const campeonId = standings[0]?.slotId ?? null;
+
+  const { error } = await supabase
+    .from("torneos")
+    .update({
+      estado: "finalizado",
+      campeon_slot_id: campeonId,
+      finalizado_en: new Date().toISOString(),
+    })
+    .eq("id", torneoId);
+  if (error) throw new Error(error.message);
+}
+</file>
+
 <file path="src/lib/football/types.ts">
 /**
  * 15 posiciones específicas del sistema nuevo.
@@ -18787,102 +19398,6 @@ export interface MatchSettings {
   seeRivalRatings: boolean;
   /** Mostrar valoraciones numéricas de los propios jugadores en el vestuario. Default: true. */
   seeOwnRatings: boolean;
-}
-</file>
-
-<file path="src/routes/index.tsx">
-import { createFileRoute } from "@tanstack/react-router";
-import { AuthProvider } from "@/hooks/use-auth";
-import { GameProvider, useGame } from "@/lib/football/store";
-import { OnlineGameProvider, useOnlineGame } from "@/lib/online/store";
-import { HomeScreen, ManualScreen } from "@/components/football/HomeScreen";
-import { LocalHeader } from "@/components/football/LocalHeader";
-import { SetupScreen } from "@/components/football/SetupScreen";
-import { HandoffScreen } from "@/components/football/HandoffScreen";
-import { LockerScreen } from "@/components/football/LockerScreen";
-import { ConfirmScreen } from "@/components/football/ConfirmScreen";
-import { MatchScreen } from "@/components/football/MatchScreen";
-import { StatsScreen } from "@/components/football/StatsScreen";
-import { TestScreen } from "@/components/football/TestScreen";
-import { TournamentListScreen } from "@/components/football/TournamentListScreen";
-import { TournamentJoinScreen } from "@/components/football/TournamentJoinScreen";
-import { TournamentSetupScreen } from "@/components/football/TournamentSetupScreen";
-import { TournamentHubScreen } from "@/components/football/TournamentHubScreen";
-import { TournamentLockerScreen } from "@/components/football/TournamentLockerScreen";
-import { TournamentFinalScreen } from "@/components/football/TournamentFinalScreen";
-import { OnlineLobbyScreen } from "@/components/online/OnlineLobbyScreen";
-import { OnlineSetupScreen } from "@/components/online/OnlineSetupScreen";
-import { OnlineLockerScreen } from "@/components/online/OnlineLockerScreen";
-import { OnlineMatchScreen } from "@/components/online/OnlineMatchScreen";
-import { OnlineStatsScreen } from "@/components/online/OnlineStatsScreen";
-
-export const Route = createFileRoute("/")({
-  component: Index,
-});
-
-function Index() {
-  return (
-    <AuthProvider>
-      <GameProvider>
-        <OnlineGameProvider>
-          <Router />
-        </OnlineGameProvider>
-      </GameProvider>
-    </AuthProvider>
-  );
-}
-
-function Router() {
-  const { activo, screen: onlineScreen } = useOnlineGame();
-  const { screen } = useGame();
-
-  // Online tree takes priority when a game session is active
-  if (activo) {
-    return <OnlineRouter screen={onlineScreen} />;
-  }
-
-  return <LocalRouter screen={screen} />;
-}
-
-function OnlineRouter({ screen }: { screen: string }) {
-  switch (screen) {
-    case "online-lobby": return <OnlineLobbyScreen />;
-    case "online-setup": return <OnlineSetupScreen />;
-    case "online-locker": return <OnlineLockerScreen />;
-    case "online-match": return <OnlineMatchScreen />;
-    case "online-stats": return <OnlineStatsScreen />;
-    default: return <OnlineLobbyScreen />;
-  }
-}
-
-function LocalRouter({ screen }: { screen: string }) {
-  return (
-    <>
-      <LocalHeader />
-      <LocalScreenSwitch screen={screen} />
-    </>
-  );
-}
-
-function LocalScreenSwitch({ screen }: { screen: string }) {
-  switch (screen) {
-    case "home": return <HomeScreen />;
-    case "manual": return <ManualScreen />;
-    case "setup": return <SetupScreen />;
-    case "handoff": return <HandoffScreen />;
-    case "locker": return <LockerScreen />;
-    case "confirm": return <ConfirmScreen />;
-    case "match": return <MatchScreen />;
-    case "stats": return <StatsScreen />;
-    case "test": return <TestScreen />;
-    case "tournament_list": return <TournamentListScreen />;
-    case "tournament_join": return <TournamentJoinScreen />;
-    case "tournament_setup": return <TournamentSetupScreen />;
-    case "tournament_hub": return <TournamentHubScreen />;
-    case "tournament_locker": return <TournamentLockerScreen />;
-    case "tournament_final": return <TournamentFinalScreen />;
-    default: return <HomeScreen />;
-  }
 }
 </file>
 
@@ -19197,6 +19712,104 @@ function PlayerRatings({ team, stats }: { team: Team; stats: Record<string, Play
       </div>
     </div>
   );
+}
+</file>
+
+<file path="src/routes/index.tsx">
+import { createFileRoute } from "@tanstack/react-router";
+import { AuthProvider } from "@/hooks/use-auth";
+import { GameProvider, useGame } from "@/lib/football/store";
+import { OnlineGameProvider, useOnlineGame } from "@/lib/online/store";
+import { HomeScreen, ManualScreen } from "@/components/football/HomeScreen";
+import { LocalHeader } from "@/components/football/LocalHeader";
+import { SetupScreen } from "@/components/football/SetupScreen";
+import { HandoffScreen } from "@/components/football/HandoffScreen";
+import { LockerScreen } from "@/components/football/LockerScreen";
+import { ConfirmScreen } from "@/components/football/ConfirmScreen";
+import { MatchScreen } from "@/components/football/MatchScreen";
+import { StatsScreen } from "@/components/football/StatsScreen";
+import { TestScreen } from "@/components/football/TestScreen";
+import { TournamentListScreen } from "@/components/football/TournamentListScreen";
+import { TournamentJoinScreen } from "@/components/football/TournamentJoinScreen";
+import { TournamentSetupScreen } from "@/components/football/TournamentSetupScreen";
+import { TournamentHubScreen } from "@/components/football/TournamentHubScreen";
+import { TournamentLockerScreen } from "@/components/football/TournamentLockerScreen";
+import { TournamentFinalScreen } from "@/components/football/TournamentFinalScreen";
+import { TournamentMatchScreen } from "@/components/football/TournamentMatchScreen";
+import { OnlineLobbyScreen } from "@/components/online/OnlineLobbyScreen";
+import { OnlineSetupScreen } from "@/components/online/OnlineSetupScreen";
+import { OnlineLockerScreen } from "@/components/online/OnlineLockerScreen";
+import { OnlineMatchScreen } from "@/components/online/OnlineMatchScreen";
+import { OnlineStatsScreen } from "@/components/online/OnlineStatsScreen";
+
+export const Route = createFileRoute("/")({
+  component: Index,
+});
+
+function Index() {
+  return (
+    <AuthProvider>
+      <GameProvider>
+        <OnlineGameProvider>
+          <Router />
+        </OnlineGameProvider>
+      </GameProvider>
+    </AuthProvider>
+  );
+}
+
+function Router() {
+  const { activo, screen: onlineScreen } = useOnlineGame();
+  const { screen } = useGame();
+
+  // Online tree takes priority when a game session is active
+  if (activo) {
+    return <OnlineRouter screen={onlineScreen} />;
+  }
+
+  return <LocalRouter screen={screen} />;
+}
+
+function OnlineRouter({ screen }: { screen: string }) {
+  switch (screen) {
+    case "online-lobby": return <OnlineLobbyScreen />;
+    case "online-setup": return <OnlineSetupScreen />;
+    case "online-locker": return <OnlineLockerScreen />;
+    case "online-match": return <OnlineMatchScreen />;
+    case "online-stats": return <OnlineStatsScreen />;
+    default: return <OnlineLobbyScreen />;
+  }
+}
+
+function LocalRouter({ screen }: { screen: string }) {
+  return (
+    <>
+      <LocalHeader />
+      <LocalScreenSwitch screen={screen} />
+    </>
+  );
+}
+
+function LocalScreenSwitch({ screen }: { screen: string }) {
+  switch (screen) {
+    case "home": return <HomeScreen />;
+    case "manual": return <ManualScreen />;
+    case "setup": return <SetupScreen />;
+    case "handoff": return <HandoffScreen />;
+    case "locker": return <LockerScreen />;
+    case "confirm": return <ConfirmScreen />;
+    case "match": return <MatchScreen />;
+    case "stats": return <StatsScreen />;
+    case "test": return <TestScreen />;
+    case "tournament_list": return <TournamentListScreen />;
+    case "tournament_join": return <TournamentJoinScreen />;
+    case "tournament_setup": return <TournamentSetupScreen />;
+    case "tournament_hub": return <TournamentHubScreen />;
+    case "tournament_locker": return <TournamentLockerScreen />;
+    case "tournament_final": return <TournamentFinalScreen />;
+    case "tournament_match_live": return <TournamentMatchScreen />;
+    default: return <HomeScreen />;
+  }
 }
 </file>
 
@@ -19796,6 +20409,7 @@ export type Screen =
   | "tournament_setup"
   | "tournament_hub"
   | "tournament_locker"
+  | "tournament_match_live"
   | "tournament_standings"
   | "tournament_bracket"
   | "tournament_match_summary"
@@ -19878,6 +20492,9 @@ interface GameCtx {
   /** Resultado de la tanda de penales del último partido, si hubo — para mostrarlo en StatsScreen. */
   tournamentPenaltyResult: { homeGoals: number; awayGoals: number } | null;
   setTournamentPenaltyResult: (r: { homeGoals: number; awayGoals: number } | null) => void;
+  /** Id de torneo_partidos que se está mirando/jugando en tiempo real (sala de espera + partido en vivo online). */
+  tournamentLiveMatchId: string | null;
+  setTournamentLiveMatchId: (id: string | null) => void;
   settings: MatchSettings;
   setSettings: (s: MatchSettings) => void;
   activeLockerTeam: 0 | 1;
@@ -19903,6 +20520,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [tournamentActiveMatchId, setTournamentActiveMatchId] = useState<string | null>(null);
   const [tournamentActiveMatchIsKnockout, setTournamentActiveMatchIsKnockout] = useState(false);
   const [tournamentPenaltyResult, setTournamentPenaltyResult] = useState<{ homeGoals: number; awayGoals: number } | null>(null);
+  const [tournamentLiveMatchId, setTournamentLiveMatchId] = useState<string | null>(null);
 
   const value = useMemo<GameCtx>(() => ({
     screen, setScreen,
@@ -19915,6 +20533,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     tournamentActiveMatchId, setTournamentActiveMatchId,
     tournamentActiveMatchIsKnockout, setTournamentActiveMatchIsKnockout,
     tournamentPenaltyResult, setTournamentPenaltyResult,
+    tournamentLiveMatchId, setTournamentLiveMatchId,
     reset: () => {
       setTeams([null, null]);
       setActiveLockerTeam(0);
@@ -19924,9 +20543,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setTournamentActiveMatchId(null);
       setTournamentActiveMatchIsKnockout(false);
       setTournamentPenaltyResult(null);
+      setTournamentLiveMatchId(null);
       setScreen("home");
     },
-  }), [screen, teams, settings, activeLockerTeam, testMode, lastMatchStats, tournamentId, tournamentActiveMatchId, tournamentActiveMatchIsKnockout, tournamentPenaltyResult]);
+  }), [screen, teams, settings, activeLockerTeam, testMode, lastMatchStats, tournamentId, tournamentActiveMatchId, tournamentActiveMatchIsKnockout, tournamentPenaltyResult, tournamentLiveMatchId]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

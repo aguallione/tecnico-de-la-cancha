@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/lib/football/store";
-import { fetchTorneoPartido } from "@/lib/football/tournament-api";
+import { fetchTorneoPartido, fetchTorneo } from "@/lib/football/tournament-api";
+import { fetchPartida } from "@/lib/online/api";
+import { avanzarPartidoTorneoEnVivo } from "@/lib/football/tournament-live-server-fns";
+import { deserializeMatchState } from "@/lib/football/serialization";
+import { possessionPct } from "@/lib/football/engine";
 import type { TournamentFixtureMatch } from "@/lib/football/tournament-types";
+import type { PartidaOnline } from "@/lib/online/types";
 
 const MENSAJES_ESPERA = [
   "Los jugadores están entrando en calor.",
@@ -66,9 +71,10 @@ function formatearMensaje(mensaje: string, minutosRestantes: number): string {
 }
 
 export function TournamentMatchScreen() {
-  const { tournamentLiveMatchId, setScreen } = useGame();
+  const { tournamentLiveMatchId, tournamentId, setScreen } = useGame();
 
   const [match, setMatch] = useState<TournamentFixtureMatch | null>(null);
+  const [formato, setFormato] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [transicionando, setTransicionando] = useState(false);
 
@@ -76,6 +82,15 @@ export function TournamentMatchScreen() {
   const bolsaRef = useRef<string[]>(barajar(MENSAJES_ESPERA));
   const [indiceMensaje, setIndiceMensaje] = useState(0);
   const [mensajeVisible, setMensajeVisible] = useState(true);
+
+  // Formato del torneo (necesario para saber si un empate al terminar el
+  // partido va a penales) — se trae una sola vez, es un dato que no cambia.
+  useEffect(() => {
+    if (!tournamentId) return;
+    fetchTorneo(tournamentId)
+      .then((t) => setFormato(t.format))
+      .catch(() => {});
+  }, [tournamentId]);
 
   // ── Polling del estado del partido ─────────────────────────────────────────
   useEffect(() => {
@@ -194,16 +209,23 @@ export function TournamentMatchScreen() {
   }
 
   if (match.status === "en_curso") {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4">
-        <div className="text-center">
-          <p className="text-muted-foreground">
-            El partido ya está en curso. La vista en vivo (4.4-6d-2b) todavía no está construida —
-            volvé al torneo y entrá de nuevo más tarde para ver el resultado.
-          </p>
-          <button className="btn-secondary mt-4" onClick={() => setScreen("tournament_hub")}>← Volver al torneo</button>
+    if (!match.partidaOnlineId || !formato) {
+      // Ventana chica entre que el vigilante marca "en_curso" y crea la
+      // partidas_online (o mientras todavía no llegó el fetch del formato) —
+      // se resuelve solo en el próximo poll (5s).
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+          <p className="text-muted-foreground">Preparando el partido...</p>
         </div>
-      </div>
+      );
+    }
+    return (
+      <TournamentLiveMatchView
+        torneoPartidoId={match.id}
+        partidaOnlineId={match.partidaOnlineId}
+        formato={formato}
+        onVolver={() => setScreen("tournament_hub")}
+      />
     );
   }
 
@@ -232,6 +254,143 @@ export function TournamentMatchScreen() {
         >
           {mensajeActual}
         </p>
+      </div>
+    </div>
+  );
+}
+
+const POLL_PARTIDA_MS = 5000;
+
+/**
+ * Vista de partido de torneo online en vivo. A diferencia de
+ * OnlineMatchScreen, NO usa OnlineGameProvider (ese contexto asume un
+ * modelo de "jugadores uniéndose a una sala", que no aplica acá — cada
+ * lado ya es dueño de un torneo_slot desde antes). Lee partidas_online
+ * directo con fetchPartida, y dispara avanzarPartidoTorneoEnVivo cada
+ * pocos segundos para que el partido avance suave mientras alguien mira
+ * — es seguro llamarla más de una vez o desde varios espectadores a la
+ * vez, calcula el minuto objetivo por tiempo real transcurrido, no por
+ * cuántas veces se invoca. Sin controles de velocidad ni panel táctico
+ * todavía (eso queda para una pasada de pulido posterior) — por ahora es
+ * de solo mirar, ideal para cuando el dueño del equipo no está presente.
+ */
+function TournamentLiveMatchView({
+  torneoPartidoId,
+  partidaOnlineId,
+  formato,
+  onVolver,
+}: {
+  torneoPartidoId: string;
+  partidaOnlineId: string;
+  formato: string;
+  onVolver: () => void;
+}) {
+  const [partida, setPartida] = useState<PartidaOnline | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const disparandoRef = useRef(false);
+
+  useEffect(() => {
+    let cancelado = false;
+
+    async function consultar() {
+      try {
+        const p = await fetchPartida(partidaOnlineId);
+        if (cancelado || !p) return;
+        setPartida(p);
+        setError(null);
+
+        if (p.estado === "jugando" && !disparandoRef.current) {
+          disparandoRef.current = true;
+          avanzarPartidoTorneoEnVivo({
+            data: { torneo_partido_id: torneoPartidoId, partida_online_id: partidaOnlineId, formato },
+          })
+            .catch(() => {})
+            .finally(() => { disparandoRef.current = false; });
+        }
+      } catch (e) {
+        if (!cancelado) setError(e instanceof Error ? e.message : "No se pudo cargar el partido.");
+      }
+    }
+
+    consultar();
+    const id = setInterval(consultar, POLL_PARTIDA_MS);
+    return () => { cancelado = true; clearInterval(id); };
+  }, [partidaOnlineId, torneoPartidoId, formato]);
+
+  const state = useMemo(
+    () => (partida?.match_state ? deserializeMatchState(partida.match_state) : null),
+    [partida?.match_state],
+  );
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4">
+        <div className="text-center">
+          <p className="text-sm text-destructive-foreground bg-destructive rounded px-3 py-2">{error}</p>
+          <button className="btn-secondary mt-4" onClick={onVolver}>← Volver al torneo</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!partida || !state) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+        <p className="text-muted-foreground">Cargando partido...</p>
+      </div>
+    );
+  }
+
+  const [teamA, teamB] = state.teams;
+  const [posA, posB] = possessionPct(state);
+  const displayMinute = state.minute > 90 ? `90+${state.minute - 90}` : `${state.minute}`;
+
+  return (
+    <div className="min-h-screen bg-background text-foreground pb-16">
+      <div className="sticky top-0 z-20 bg-pitch text-pitch-foreground shadow-md">
+        <div className="max-w-3xl mx-auto px-4 py-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+          <div className="text-right min-w-0">
+            <div className="font-display font-black text-sm sm:text-base truncate">{teamA.config.name}</div>
+            <div className="text-[10px] uppercase tracking-wider text-lime-200/70">
+              {teamA.formation} · {teamA.style}
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="font-display text-3xl sm:text-4xl font-black tabular-nums">
+              {teamA.goals} : {teamB.goals}
+            </div>
+            <div className="text-[11px] tracking-[0.2em] uppercase text-lime-200/80 mt-0.5">
+              {state.finished ? "Final" : `${displayMinute}'`}
+            </div>
+          </div>
+          <div className="text-left min-w-0">
+            <div className="font-display font-black text-sm sm:text-base truncate">{teamB.config.name}</div>
+            <div className="text-[10px] uppercase tracking-wider text-lime-200/70">
+              {teamB.formation} · {teamB.style}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-3xl mx-auto px-4 mt-4">
+        <div className="card p-3 text-xs flex items-center justify-between">
+          <span>Posesión</span>
+          <span className="font-display tabular-nums">{posA}% · {posB}%</span>
+        </div>
+        {state.finished && (
+          <div className="card p-3 mt-3 text-center bg-primary/10 border border-primary/30">
+            <p className="text-sm">Este partido ya terminó.</p>
+            <button className="btn-primary mt-2" onClick={onVolver}>Volver al torneo →</button>
+          </div>
+        )}
+        <div className="mt-3 space-y-2">
+          {[...state.events].reverse().map((ev, i) => (
+            <div key={i} className="card p-3 text-sm">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{ev.minute}'</div>
+              <div className="mt-0.5">{ev.text}</div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
