@@ -12,7 +12,17 @@ export type Screen =
   | "confirm"
   | "match"
   | "stats"
-  | "test";
+  | "test"
+  | "tournament_list"
+  | "tournament_join"
+  | "tournament_setup"
+  | "tournament_hub"
+  | "tournament_locker"
+  | "tournament_match_live"
+  | "tournament_standings"
+  | "tournament_bracket"
+  | "tournament_match_summary"
+  | "tournament_final";
 
 export function makeTeam(config: TeamConfig): Team {
   const squad = generateSquad(20);
@@ -79,6 +89,21 @@ interface GameCtx {
   setScreen: (s: Screen) => void;
   teams: [Team | null, Team | null];
   setTeams: (t: [Team | null, Team | null]) => void;
+  /** Id del torneo activo, mientras se navega entre las pantallas de tournament_*. */
+  tournamentId: string | null;
+  setTournamentId: (id: string | null) => void;
+  /** Id de torneo_partidos que se está jugando ahora mismo (para escribir el resultado al terminar). */
+  tournamentActiveMatchId: string | null;
+  setTournamentActiveMatchId: (id: string | null) => void;
+  /** True si el partido activo pertenece a un torneo de Eliminación directa (define si un empate va a penales). */
+  tournamentActiveMatchIsKnockout: boolean;
+  setTournamentActiveMatchIsKnockout: (v: boolean) => void;
+  /** Resultado de la tanda de penales del último partido, si hubo — para mostrarlo en StatsScreen. */
+  tournamentPenaltyResult: { homeGoals: number; awayGoals: number } | null;
+  setTournamentPenaltyResult: (r: { homeGoals: number; awayGoals: number } | null) => void;
+  /** Id de torneo_partidos que se está mirando/jugando en tiempo real (sala de espera + partido en vivo online). */
+  tournamentLiveMatchId: string | null;
+  setTournamentLiveMatchId: (id: string | null) => void;
   settings: MatchSettings;
   setSettings: (s: MatchSettings) => void;
   activeLockerTeam: 0 | 1;
@@ -100,6 +125,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [activeLockerTeam, setActiveLockerTeam] = useState<0 | 1>(0);
   const [testMode, setTestMode] = useState(false);
   const [lastMatchStats, setLastMatchStats] = useState<Record<string, PlayerMatchStats>>({});
+  const [tournamentId, setTournamentId] = useState<string | null>(null);
+  const [tournamentActiveMatchId, setTournamentActiveMatchId] = useState<string | null>(null);
+  const [tournamentActiveMatchIsKnockout, setTournamentActiveMatchIsKnockout] = useState(false);
+  const [tournamentPenaltyResult, setTournamentPenaltyResult] = useState<{ homeGoals: number; awayGoals: number } | null>(null);
+  const [tournamentLiveMatchId, setTournamentLiveMatchId] = useState<string | null>(null);
 
   const value = useMemo<GameCtx>(() => ({
     screen, setScreen,
@@ -108,14 +138,24 @@ export function GameProvider({ children }: { children: ReactNode }) {
     activeLockerTeam, setActiveLockerTeam,
     testMode, setTestMode,
     lastMatchStats, setLastMatchStats,
+    tournamentId, setTournamentId,
+    tournamentActiveMatchId, setTournamentActiveMatchId,
+    tournamentActiveMatchIsKnockout, setTournamentActiveMatchIsKnockout,
+    tournamentPenaltyResult, setTournamentPenaltyResult,
+    tournamentLiveMatchId, setTournamentLiveMatchId,
     reset: () => {
       setTeams([null, null]);
       setActiveLockerTeam(0);
       setTestMode(false);
       setLastMatchStats({});
+      setTournamentId(null);
+      setTournamentActiveMatchId(null);
+      setTournamentActiveMatchIsKnockout(false);
+      setTournamentPenaltyResult(null);
+      setTournamentLiveMatchId(null);
       setScreen("home");
     },
-  }), [screen, teams, settings, activeLockerTeam, testMode, lastMatchStats]);
+  }), [screen, teams, settings, activeLockerTeam, testMode, lastMatchStats, tournamentId, tournamentActiveMatchId, tournamentActiveMatchIsKnockout, tournamentPenaltyResult, tournamentLiveMatchId]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

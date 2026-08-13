@@ -1,4 +1,4 @@
-import { FORMATION_LIST, FORMATIONS, slotsFor, slotGroup as slotGroupForPosition } from "./formations";
+import { FORMATION_LIST, slotsFor } from "./formations";
 import { computePlayerPositionRating } from "./engine";
 import type { FormationName, Player, PositionGroup, Team } from "./types";
 import { POSITION_GROUP } from "./types";

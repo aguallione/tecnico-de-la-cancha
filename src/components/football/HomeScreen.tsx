@@ -1,57 +1,16 @@
 import { useState } from "react";
-import { LogIn, LogOut, User, Wifi, WifiOff } from "lucide-react";
+import { Wifi, WifiOff } from "lucide-react";
 import { useGame } from "@/lib/football/store";
-import { useAuth } from "@/hooks/use-auth";
 import { useOnlineGame } from "@/lib/online/store";
 import { crearPartida, unirsePorCodigo } from "@/lib/online/api";
-import { AuthModal } from "@/components/football/AuthModal";
 
 export function HomeScreen() {
   const { setScreen, setSettings, settings, setTestMode } = useGame();
-  const { user, signOut, loading: authLoading } = useAuth();
   const { entrar } = useOnlineGame();
-  const [authModalOpen, setAuthModalOpen] = useState(false);
   const [onlineModal, setOnlineModal] = useState<"create" | "join" | null>(null);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 py-10 bg-pitch text-pitch-foreground">
-      {/* Barra de sesión */}
-      <div className="fixed top-4 right-4 z-40">
-        {!authLoading && (
-          user ? (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-pitch-foreground/70 flex items-center gap-1">
-                <User size={12} />
-                {user.email}
-              </span>
-              <button
-                onClick={() => signOut()}
-                className="flex items-center gap-1 text-xs text-pitch-foreground/70 hover:text-pitch-foreground transition-colors border border-pitch-foreground/20 rounded px-2 py-1"
-                aria-label="Cerrar sesión"
-              >
-                <LogOut size={12} />
-                Salir
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setAuthModalOpen(true)}
-              className="flex items-center gap-1 text-xs text-pitch-foreground/70 hover:text-pitch-foreground transition-colors border border-pitch-foreground/20 rounded px-2 py-1"
-              aria-label="Iniciar sesión"
-            >
-              <LogIn size={12} />
-              Iniciar sesión
-            </button>
-          )
-        )}
-      </div>
-
-      <AuthModal
-        open={authModalOpen}
-        onClose={() => setAuthModalOpen(false)}
-        reason="Iniciá sesión para guardar y cargar equipos entre sesiones."
-      />
-
       <div className="max-w-lg w-full text-center">
         <div className="mb-2 tracking-[0.3em] text-xs uppercase text-lime-300/80">Simulador</div>
         <h1 className="font-display text-5xl sm:text-6xl font-black leading-none">
@@ -74,6 +33,18 @@ export function HomeScreen() {
             className="btn-secondary"
           >
             Nueva partida vs Amigo (mismo dispositivo)
+          </button>
+          <button
+            onClick={() => setScreen("tournament_setup")}
+            className="btn-secondary"
+          >
+            Nuevo torneo (Liga / Copa)
+          </button>
+          <button
+            onClick={() => setScreen("tournament_list")}
+            className="btn-ghost"
+          >
+            Mis torneos
           </button>
 
           {/* Separador online */}

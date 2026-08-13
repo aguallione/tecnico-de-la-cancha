@@ -14,8 +14,10 @@
  * match_state serializado y pasa a estado 'jugando').
  */
 
-import { useMemo, useRef, useState } from "react";
-import { FORMATION_LIST, slotsFor, rowsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { FORMATION_LIST, slotsFor, rowsFor, registerCustomFormation, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
+import { useFormacionesPersonalizadas } from "@/hooks/use-formaciones-personalizadas";
+import { FormationEditorModal } from "@/components/football/FormationEditorModal";
 import { autoLineup } from "@/lib/football/bot";
 import { initMatch, computePlayerPositionRating } from "@/lib/football/engine";
 import {
@@ -133,7 +135,13 @@ function LockerInner({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
   const startedRef = useRef(false);
+  const { formaciones: formacionesPersonalizadas, guardar: guardarFormacion } = useFormacionesPersonalizadas();
+
+  useEffect(() => {
+    for (const f of formacionesPersonalizadas) registerCustomFormation(f.id, f.filas);
+  }, [formacionesPersonalizadas]);
 
   const modo: ModoCoop = miEquipo === 0 ? partida!.modo_coop_0 : partida!.modo_coop_1;
   const misCompaneros = jugadoresDeEquipo(jugadores, miEquipo);
@@ -250,10 +258,24 @@ function LockerInner({
                   value={team.formation}
                   onChange={(e) => changeFormation(e.target.value as FormationName)}
                 >
-                  {FORMATION_LIST.map((f) => (
-                    <option key={f}>{f}</option>
-                  ))}
+                  <optgroup label="Predefinidas">
+                    {FORMATION_LIST.map((f) => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
+                  </optgroup>
+                  {formacionesPersonalizadas.length > 0 && (
+                    <optgroup label="Mis formaciones">
+                      {formacionesPersonalizadas.map((f) => (
+                        <option key={f.id} value={f.id}>{f.nombre}</option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
+                {canEdit && (
+                  <button type="button" onClick={() => setEditorOpen(true)} className="btn-ghost text-xs mt-1 py-1 px-2">
+                    + Crear formación
+                  </button>
+                )}
               </div>
               <div>
                 <div className="label">Estilo</div>
@@ -444,6 +466,18 @@ function LockerInner({
           adminDeviceId={partida!.admin_device_id}
           onClose={() => setTransferOpen(false)}
           onDone={refrescar}
+        />
+      )}
+
+      {editorOpen && (
+        <FormationEditorModal
+          guardar={guardarFormacion}
+          onClose={() => setEditorOpen(false)}
+          onSaved={(nombre: string, filasGuardadas: Position[][]) => {
+            registerCustomFormation(nombre, filasGuardadas);
+            changeFormation(nombre);
+            setEditorOpen(false);
+          }}
         />
       )}
     </div>

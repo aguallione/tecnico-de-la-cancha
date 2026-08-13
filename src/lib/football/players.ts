@@ -1,5 +1,6 @@
 import type { Player, Position, PositionGroup } from "./types";
 import { POSITION_GROUP } from "./types";
+import { computePlayerPositionRating } from "./engine";
 
 const FIRST = [
   "Juan","Diego","Carlos","Martín","Facundo","Nicolás","Sebastián","Lucas","Mateo","Franco",
@@ -22,8 +23,39 @@ export function uid(): string {
 
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
 function rand(min: number, max: number): number { return Math.floor(Math.random() * (max - min + 1)) + min; }
+const clamp = (n: number) => Math.max(30, Math.min(99, n));
+
+/** Valor aleatorio como fracción de `base` (ej: fracOf(75, 0.6, 0.7) da algo entre 45 y 52). */
+function fracOf(base: number, loFrac: number, hiFrac: number): number {
+  return clamp(Math.round(base * (loFrac + Math.random() * (hiFrac - loFrac))));
+}
 
 function attributesFor(pos: Position, base: number) {
+  const group: PositionGroup = POSITION_GROUP[pos];
+
+  if (group === "GK") {
+    // Los arqueros son deliberadamente flojos como jugadores de campo — su
+    // calidad real está en sus 5 atributos de arquero, no acá. Cada atributo
+    // de campo es una fracción de `base`, no un promedio simple, para que un
+    // arquero nunca rinda como un defensor o delantero real jugando de campo.
+    const base6 = {
+      passing: fracOf(base, 0.60, 0.70),   // cerca de dos tercios
+      shooting: fracOf(base, 0.28, 0.38),  // cerca de un tercio
+      dribbling: fracOf(base, 0.60, 0.70), // cerca de dos tercios
+      defense: fracOf(base, 0.18, 0.25),   // un cuarto o un poco menos
+      physical: fracOf(base, 0.65, 0.75),  // entre dos tercios y tres cuartos
+      pace: fracOf(base, 0.45, 0.55),      // cerca de la mitad
+    };
+    return {
+      ...base6,
+      gkDiving: clamp(base + rand(-6, 10)),
+      gkHandling: clamp(base + rand(-6, 10)),
+      gkKicking: clamp(base + rand(-10, 6)),
+      gkReflexes: clamp(base + rand(-6, 10)),
+      gkPositioning: clamp(base + rand(-6, 8)),
+    };
+  }
+
   const jitter = () => rand(-8, 8);
   let passing = base + jitter();
   let shooting = base + jitter();
@@ -31,11 +63,7 @@ function attributesFor(pos: Position, base: number) {
   let defense = base + jitter();
   let physical = base + jitter();
   let pace = base + jitter();
-  const group: PositionGroup = POSITION_GROUP[pos];
   switch (group) {
-    case "GK":
-      defense += 12; shooting -= 25; pace -= 8; passing -= 6; dribbling -= 18; physical += 4;
-      break;
     case "DEF":
       defense += 10; shooting -= 10; dribbling -= 6; passing -= 2;
       break;
@@ -46,8 +74,7 @@ function attributesFor(pos: Position, base: number) {
       shooting += 10; dribbling += 8; defense -= 10; pace += 4; passing += 2;
       break;
   }
-  const clamp = (n: number) => Math.max(30, Math.min(99, n));
-  const base6 = {
+  return {
     passing: clamp(passing),
     shooting: clamp(shooting),
     dribbling: clamp(dribbling),
@@ -55,18 +82,6 @@ function attributesFor(pos: Position, base: number) {
     physical: clamp(physical),
     pace: clamp(pace),
   };
-  // Atributos exclusivos de arquero
-  if (group === "GK") {
-    return {
-      ...base6,
-      gkDiving: clamp(base + rand(-6, 10)),
-      gkHandling: clamp(base + rand(-6, 10)),
-      gkKicking: clamp(base + rand(-10, 6)),
-      gkReflexes: clamp(base + rand(-6, 10)),
-      gkPositioning: clamp(base + rand(-6, 8)),
-    };
-  }
-  return base6;
 }
 
 /**
@@ -89,9 +104,13 @@ export function generateSquad(size = 20): Player[] {
   return positions.map((pos) => {
     const base = rand(55, 88);
     const attrs = attributesFor(pos, base);
-    const overall = Math.round(
-      (attrs.passing + attrs.shooting + attrs.dribbling + attrs.defense + attrs.physical + attrs.pace) / 6,
-    );
+    const isGK = POSITION_GROUP[pos] === "GK";
+    // Para arqueros, la valoración general sale de sus atributos de arquero
+    // (misma fórmula que usa todo el resto del juego), no del promedio de
+    // los 6 atributos de campo, que ahora son deliberadamente bajos.
+    const overall = isGK
+      ? computePlayerPositionRating({ ...attrs, position: pos } as Player, "POR")
+      : Math.round((attrs.passing + attrs.shooting + attrs.dribbling + attrs.defense + attrs.physical + attrs.pace) / 6);
     const name = `${pick(FIRST)} ${pick(LAST)}`;
     return {
       id: uid(),

@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/lib/football/store";
 import { initMatch, substitute, tickMinute, possessionPct, computePlayerPositionRating, type MatchState } from "@/lib/football/engine";
+import { escribirResultadoTorneoPartido } from "@/lib/football/tournament-server-fns";
+import { simulatePenaltyShootout } from "@/lib/football/tournament-penalties";
 import { autoLineup } from "@/lib/football/bot";
 import { FORMATION_LIST, slotsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
+import { PitchMap2D } from "@/components/football/PitchMap2D";
 import type { BuildUp, FormationName, LineHeight, Player, Position, PositionGroup, PressIntensity, Style, Team } from "@/lib/football/types";
 import { POSITION_GROUP } from "@/lib/football/types";
 
@@ -21,9 +24,13 @@ const EMERGENCY_FORMATION: FormationName = "5-3-2";
 const TICK_MS = 900;
 
 export function MatchScreen() {
-  const { setScreen, teams, settings, setLastMatchStats } = useGame();
+  const {
+    setScreen, teams, settings, setLastMatchStats,
+    tournamentActiveMatchId, tournamentActiveMatchIsKnockout, setTournamentPenaltyResult,
+  } = useGame();
   const [a, b] = teams;
   const stateRef = useRef<MatchState | null>(null);
+  const resultadoTorneoEnviadoRef = useRef(false);
   const [, force] = useState(0);
   const rerender = () => force((n) => n + 1);
   const [paused, setPaused] = useState(false);
@@ -74,6 +81,31 @@ export function MatchScreen() {
       rerender();
       if (s.finished) {
         setLastMatchStats(s.playerStats);
+        if (tournamentActiveMatchId && !resultadoTorneoEnviadoRef.current) {
+          resultadoTorneoEnviadoRef.current = true;
+
+          const empatado = s.teams[0].goals === s.teams[1].goals;
+          const penaltyResult =
+            tournamentActiveMatchIsKnockout && empatado
+              ? simulatePenaltyShootout([s.teams[0], s.teams[1]]).result
+              : null;
+          setTournamentPenaltyResult(penaltyResult);
+
+          escribirResultadoTorneoPartido({
+            data: {
+              torneo_partido_id: tournamentActiveMatchId,
+              resultado: {
+                homeGoals: s.teams[0].goals,
+                awayGoals: s.teams[1].goals,
+                stats: { players: s.playerStats },
+                events: s.events,
+                ...(penaltyResult ? { penalties: penaltyResult } : {}),
+              },
+            },
+          }).catch((err) => {
+            console.error("No se pudo guardar el resultado del torneo:", err);
+          });
+        }
         setTimeout(() => setScreen("stats"), 1500);
       }
     }, TICK_MS / speed);
@@ -105,6 +137,11 @@ export function MatchScreen() {
           <button className="chip" onClick={() => setSpeed(2)} data-active={speed === 2}>2x</button>
           <button className="chip" onClick={() => setSpeed(4)} data-active={speed === 4}>4x</button>
         </div>
+      </div>
+
+      {/* Mapa 2D */}
+      <div className="max-w-3xl mx-auto px-4 mt-4">
+        <PitchMap2D state={state} stepDurationMs={TICK_MS / speed} />
       </div>
 
       {/* Relato */}
