@@ -191,14 +191,17 @@ export function OnlineMatchScreen() {
           </span>
         </div>
         <div className="mt-3 space-y-2">
-          {[...state.events].reverse().map((ev, i) => (
-            <div key={i} className={`card p-3 text-sm ${eventClass(ev.kind, ev.text)}`}>
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                {ev.minute}&apos;
+          {[...state.events]
+            .filter((ev) => ev.kind !== "insight" || ev.team === miEquipoIdx)
+            .reverse()
+            .map((ev, i) => (
+              <div key={i} className={`card p-3 text-sm ${eventClass(ev.kind, ev.text)}`}>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {ev.minute}&apos;
+                </div>
+                <div className="mt-0.5">{ev.text}</div>
               </div>
-              <div className="mt-0.5">{ev.text}</div>
-            </div>
-          ))}
+            ))}
         </div>
       </div>
 
