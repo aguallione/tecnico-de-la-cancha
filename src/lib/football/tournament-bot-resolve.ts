@@ -28,7 +28,7 @@ export async function resolverPartidoAutomatico(params: {
 
   const teamA = teamFromSlot(home);
   const teamB = teamFromSlot(away);
-  const state = initMatch([teamA, teamB], matchSettings);
+  const state = initMatch([teamA, teamB], { ...matchSettings, interactive: false });
 
   // Salvaguarda de emergencia: no debería pasar nunca (un partido normal
   // termina en 90+ minutos), pero evita un loop infinito si algo del motor

@@ -220,6 +220,56 @@ This section contains the contents of the repository's files.
 }
 </file>
 
+<file path="src/components/football/HandoffScreen.tsx">
+import { useGame } from "@/lib/football/store";
+import { autoBotTeam } from "@/lib/football/bot";
+
+export function HandoffScreen() {
+  const { setScreen, teams, activeLockerTeam, setActiveLockerTeam, settings } = useGame();
+  const currentTeam = teams[activeLockerTeam];
+  if (!currentTeam) return null;
+
+  // Si es el bot, saltar armado automáticamente
+  if (currentTeam.config.isBot) {
+    autoBotTeam(currentTeam);
+    // Ir directo a confirmar
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-pitch text-pitch-foreground px-6">
+        <div className="text-center max-w-md">
+          <div className="text-xs uppercase tracking-[0.3em] text-lime-300/70">Rival CPU</div>
+          <h2 className="mt-2 font-display text-3xl font-black">El bot preparó su equipo</h2>
+          <p className="mt-3 text-pitch-foreground/80">Formación {currentTeam.formation}, estilo {currentTeam.style}.</p>
+          <button className="btn-primary mt-8 w-full" onClick={() => setScreen("confirm")}>Ir a la previa →</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-pitch text-pitch-foreground px-6">
+      <div className="text-center max-w-md">
+        <div className="text-xs uppercase tracking-[0.3em] text-lime-300/70">
+          {settings.vsBot ? "Tu turno" : `Turno ${activeLockerTeam + 1} de 2`}
+        </div>
+        <h2 className="mt-2 font-display text-3xl sm:text-4xl font-black">
+          Pasále el dispositivo a {currentTeam.config.name}
+        </h2>
+        <p className="mt-4 text-pitch-foreground/80">
+          Que nadie más mire la pantalla. Vas a armar tu plantel y elegir tu táctica sin que el rival vea.
+        </p>
+        <div className="mt-6 inline-flex items-center gap-3 rounded-full border border-lime-300/40 px-4 py-2">
+          <span className="h-4 w-4 rounded-full" style={{ backgroundColor: currentTeam.config.color }} />
+          <span className="font-display font-bold">{currentTeam.config.name}</span>
+        </div>
+        <button className="btn-primary mt-10 w-full" onClick={() => setScreen("locker")}>
+          Estoy listo, al vestuario →
+        </button>
+      </div>
+    </div>
+  );
+}
+</file>
+
 <file path="src/components/ui/accordion.tsx">
 import * as React from "react";
 import * as AccordionPrimitive from "@radix-ui/react-accordion";
@@ -4983,26 +5033,6 @@ export const startInstance = createStart(() => ({
 }));
 </file>
 
-<file path="supabase/migrations/20260809204500_activar_cron_resolver_torneos.sql">
-create extension if not exists pg_cron with schema extensions;
-create extension if not exists pg_net with schema extensions;
-
-select cron.schedule(
-  'resolver-torneos-online',
-  '* * * * *',
-  $$
-  select net.http_post(
-    url := 'https://tecnico-de-la-cancha.vercel.app/api/resolver-torneos',
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'x-resolver-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'torneo_resolver_secret')
-    ),
-    body := '{}'::jsonb
-  );
-  $$
-);
-</file>
-
 <file path=".prettierignore">
 node_modules
 dist
@@ -5716,56 +5746,6 @@ export function FormationEditorModal({ onClose, onSaved, guardar }: Props) {
             {saving ? "Guardando..." : "Guardar formación"}
           </button>
         </div>
-      </div>
-    </div>
-  );
-}
-</file>
-
-<file path="src/components/football/HandoffScreen.tsx">
-import { useGame } from "@/lib/football/store";
-import { autoBotTeam } from "@/lib/football/bot";
-
-export function HandoffScreen() {
-  const { setScreen, teams, activeLockerTeam, setActiveLockerTeam, settings } = useGame();
-  const currentTeam = teams[activeLockerTeam];
-  if (!currentTeam) return null;
-
-  // Si es el bot, saltar armado automáticamente
-  if (currentTeam.config.isBot) {
-    autoBotTeam(currentTeam);
-    // Ir directo a confirmar
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-pitch text-pitch-foreground px-6">
-        <div className="text-center max-w-md">
-          <div className="text-xs uppercase tracking-[0.3em] text-lime-300/70">Rival CPU</div>
-          <h2 className="mt-2 font-display text-3xl font-black">El bot preparó su equipo</h2>
-          <p className="mt-3 text-pitch-foreground/80">Formación {currentTeam.formation}, estilo {currentTeam.style}.</p>
-          <button className="btn-primary mt-8 w-full" onClick={() => setScreen("confirm")}>Ir a la previa →</button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-pitch text-pitch-foreground px-6">
-      <div className="text-center max-w-md">
-        <div className="text-xs uppercase tracking-[0.3em] text-lime-300/70">
-          {settings.vsBot ? "Tu turno" : `Turno ${activeLockerTeam + 1} de 2`}
-        </div>
-        <h2 className="mt-2 font-display text-3xl sm:text-4xl font-black">
-          Pasále el dispositivo a {currentTeam.config.name}
-        </h2>
-        <p className="mt-4 text-pitch-foreground/80">
-          Que nadie más mire la pantalla. Vas a armar tu plantel y elegir tu táctica sin que el rival vea.
-        </p>
-        <div className="mt-6 inline-flex items-center gap-3 rounded-full border border-lime-300/40 px-4 py-2">
-          <span className="h-4 w-4 rounded-full" style={{ backgroundColor: currentTeam.config.color }} />
-          <span className="font-display font-bold">{currentTeam.config.name}</span>
-        </div>
-        <button className="btn-primary mt-10 w-full" onClick={() => setScreen("locker")}>
-          Estoy listo, al vestuario →
-        </button>
       </div>
     </div>
   );
@@ -6970,406 +6950,6 @@ function PitchLines() {
 }
 </file>
 
-<file path="src/components/football/TournamentMatchScreen.tsx">
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useGame } from "@/lib/football/store";
-import { fetchTorneoPartido, fetchTorneo } from "@/lib/football/tournament-api";
-import { fetchPartida } from "@/lib/online/api";
-import { avanzarPartidoTorneoEnVivo } from "@/lib/football/tournament-live-server-fns";
-import { deserializeMatchState } from "@/lib/football/serialization";
-import { possessionPct } from "@/lib/football/engine";
-import type { TournamentFixtureMatch } from "@/lib/football/tournament-types";
-import type { PartidaOnline } from "@/lib/online/types";
-
-const MENSAJES_ESPERA = [
-  "Los jugadores están entrando en calor.",
-  "El árbitro revisa la cancha antes del pitazo inicial.",
-  "Todavía estás a tiempo de hacer un último cambio táctico.",
-  "El DT rival ya confirmó su alineación.",
-  "Se siente la previa en el vestuario...",
-  "__FALTAN_X__",
-  "Los equipos terminan de ajustar los últimos detalles.",
-  "El cuerpo técnico prepara las últimas indicaciones.",
-  "Últimos minutos antes de que ruede la pelota.",
-  "El árbitro y sus asistentes ultiman los preparativos.",
-  "Las tribunas comienzan a llenarse.",
-  "La tensión crece a medida que se acerca el comienzo.",
-  "Los jugadores esperan la señal para salir.",
-  "Últimos ajustes en la formación.",
-  "El DT revisa por última vez el planteamiento.",
-  "Se repasan las instrucciones tácticas antes de salir.",
-  "La previa llega a sus últimos instantes.",
-  "Los protagonistas están a punto de salir.",
-  "El equipo rival termina su calentamiento.",
-  "Se ultiman los detalles del espectáculo.",
-  "La pelota espera por sus protagonistas.",
-  "El ambiente se empieza a encender.",
-  "Cada minuto que pasa nos acerca al pitazo inicial.",
-  "Los últimos minutos de espera pueden cambiarlo todo.",
-  "El cuarto árbitro verifica que todo esté en orden.",
-  "Los equipos reciben la última autorización para salir.",
-  "En cualquier momento, comienza el espectáculo.",
-  "Los últimos ajustes pueden marcar la diferencia.",
-  "Noventa minutos para demostrar el trabajo de toda la semana.",
-  "El planteamiento está listo para ponerse a prueba.",
-  "Los jugadores esperan las últimas órdenes del cuerpo técnico.",
-  "Un último vistazo a la táctica antes de salir.",
-  "El rival ya está preparado. ¿Tu equipo también?",
-  "La concentración es máxima en ambos vestuarios.",
-  "Todo lo trabajado está a punto de ponerse a prueba.",
-  "El partido se gana en la cancha, pero la preparación empieza antes.",
-  "La pelota todavía no rueda, pero el partido ya se empieza a jugar.",
-  "La espera está por terminar. La decisión queda en manos de los protagonistas.",
-];
-
-const POLL_MS = 5000;
-const ROTACION_MS = 5000;
-
-/** Baraja un array (Fisher-Yates), sin mutar el original. */
-function barajar<T>(arr: T[]): T[] {
-  const copia = [...arr];
-  for (let i = copia.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copia[i], copia[j]] = [copia[j], copia[i]];
-  }
-  return copia;
-}
-
-function formatearMensaje(mensaje: string, minutosRestantes: number): string {
-  if (mensaje === "__FALTAN_X__") {
-    const min = Math.max(0, Math.round(minutosRestantes));
-    return `Faltan ${min} minuto${min === 1 ? "" : "s"} para el pitazo inicial.`;
-  }
-  return mensaje;
-}
-
-export function TournamentMatchScreen() {
-  const { tournamentLiveMatchId, tournamentId, setScreen } = useGame();
-
-  const [match, setMatch] = useState<TournamentFixtureMatch | null>(null);
-  const [formato, setFormato] = useState<string>("");
-  const [error, setError] = useState<string | null>(null);
-  const [transicionando, setTransicionando] = useState(false);
-
-  // ── Bolsa sin repetición para los mensajes rotativos ──────────────────────
-  const bolsaRef = useRef<string[]>(barajar(MENSAJES_ESPERA));
-  const [indiceMensaje, setIndiceMensaje] = useState(0);
-  const [mensajeVisible, setMensajeVisible] = useState(true);
-
-  // Formato del torneo (necesario para saber si un empate al terminar el
-  // partido va a penales) — se trae una sola vez, es un dato que no cambia.
-  useEffect(() => {
-    if (!tournamentId) return;
-    fetchTorneo(tournamentId)
-      .then((t) => setFormato(t.format))
-      .catch(() => {});
-  }, [tournamentId]);
-
-  // ── Polling del estado del partido ─────────────────────────────────────────
-  useEffect(() => {
-    if (!tournamentLiveMatchId) return;
-    let cancelado = false;
-
-    async function consultar() {
-      try {
-        const m = await fetchTorneoPartido(tournamentLiveMatchId!);
-        if (cancelado) return;
-        setMatch((anterior) => {
-          if (anterior && anterior.status === "pendiente" && m.status === "en_curso") {
-            setTransicionando(true);
-            if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-              new Notification("¡Arrancó tu partido de torneo!");
-            }
-            setTimeout(() => setTransicionando(false), 2000);
-          }
-          return m;
-        });
-        setError(null);
-      } catch (e) {
-        if (!cancelado) setError(e instanceof Error ? e.message : "No se pudo cargar el partido.");
-      }
-    }
-
-    consultar();
-    const id = setInterval(consultar, POLL_MS);
-    return () => { cancelado = true; clearInterval(id); };
-  }, [tournamentLiveMatchId]);
-
-  useEffect(() => {
-    if (typeof Notification !== "undefined" && Notification.permission === "default") {
-      Notification.requestPermission().catch(() => {});
-    }
-  }, []);
-
-  // ── Rotación de mensajes (bolsa sin repetición) ────────────────────────────
-  useEffect(() => {
-    if (!match || match.status !== "pendiente") return;
-    const id = setInterval(() => {
-      setMensajeVisible(false);
-      setTimeout(() => {
-        setIndiceMensaje((i) => {
-          const siguiente = i + 1;
-          if (siguiente >= bolsaRef.current.length) {
-            bolsaRef.current = barajar(MENSAJES_ESPERA);
-            return 0;
-          }
-          return siguiente;
-        });
-        setMensajeVisible(true);
-      }, 400);
-    }, ROTACION_MS);
-    return () => clearInterval(id);
-  }, [match?.status]);
-
-  const minutosRestantes = useMemo(() => {
-    if (!match?.scheduledAt) return 0;
-    const diffMs = new Date(match.scheduledAt).getTime() - Date.now();
-    return diffMs / 60000;
-  }, [match?.scheduledAt]);
-
-  if (!tournamentLiveMatchId) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
-        <div className="text-center">
-          <p>No hay ningún partido en seguimiento.</p>
-          <button className="btn-primary mt-4" onClick={() => setScreen("tournament_hub")}>← Volver al torneo</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4">
-        <div className="text-center">
-          <p className="text-sm text-destructive-foreground bg-destructive rounded px-3 py-2">{error}</p>
-          <button className="btn-primary mt-4" onClick={() => setScreen("tournament_hub")}>← Volver al torneo</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!match) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
-        <p className="text-muted-foreground">Cargando partido...</p>
-      </div>
-    );
-  }
-
-  if (match.status === "jugado" || match.status === "walkover") {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4">
-        <div className="text-center">
-          <p>Este partido ya terminó.</p>
-          <button className="btn-primary mt-4" onClick={() => setScreen("tournament_hub")}>
-            Ver resultado en el torneo →
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (transicionando) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-pitch text-pitch-foreground">
-        <div className="text-center animate-pulse">
-          <div className="text-4xl">⚽</div>
-          <p className="font-display text-2xl font-black mt-3">¡Arrancó el partido!</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (match.status === "en_curso") {
-    if (!match.partidaOnlineId || !formato) {
-      // Ventana chica entre que el vigilante marca "en_curso" y crea la
-      // partidas_online (o mientras todavía no llegó el fetch del formato) —
-      // se resuelve solo en el próximo poll (5s).
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
-          <p className="text-muted-foreground">Preparando el partido...</p>
-        </div>
-      );
-    }
-    return (
-      <TournamentLiveMatchView
-        torneoPartidoId={match.id}
-        partidaOnlineId={match.partidaOnlineId}
-        formato={formato}
-        onVolver={() => setScreen("tournament_hub")}
-      />
-    );
-  }
-
-  // Sala de espera (status === "pendiente")
-  const mensajeActual = formatearMensaje(bolsaRef.current[indiceMensaje], minutosRestantes);
-
-  return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-pitch text-pitch-foreground px-6">
-      <button
-        className="absolute top-4 left-4 text-xs text-pitch-foreground/70 hover:text-pitch-foreground"
-        onClick={() => setScreen("tournament_hub")}
-      >
-        ← Volver al torneo
-      </button>
-      <div className="text-xs uppercase tracking-[0.3em] text-lime-300/80">Sala de espera</div>
-      <div className="mt-3 font-display text-3xl font-black">
-        {match.scheduledAt
-          ? new Date(match.scheduledAt).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" })
-          : "Horario a confirmar"}
-      </div>
-      <div className="mt-10 h-16 flex items-center justify-center max-w-md text-center">
-        <p
-          className={`text-lime-100/90 transition-all duration-500 ${
-            mensajeVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2"
-          }`}
-        >
-          {mensajeActual}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-const POLL_PARTIDA_MS = 5000;
-
-/**
- * Vista de partido de torneo online en vivo. A diferencia de
- * OnlineMatchScreen, NO usa OnlineGameProvider (ese contexto asume un
- * modelo de "jugadores uniéndose a una sala", que no aplica acá — cada
- * lado ya es dueño de un torneo_slot desde antes). Lee partidas_online
- * directo con fetchPartida, y dispara avanzarPartidoTorneoEnVivo cada
- * pocos segundos para que el partido avance suave mientras alguien mira
- * — es seguro llamarla más de una vez o desde varios espectadores a la
- * vez, calcula el minuto objetivo por tiempo real transcurrido, no por
- * cuántas veces se invoca. Sin controles de velocidad ni panel táctico
- * todavía (eso queda para una pasada de pulido posterior) — por ahora es
- * de solo mirar, ideal para cuando el dueño del equipo no está presente.
- */
-function TournamentLiveMatchView({
-  torneoPartidoId,
-  partidaOnlineId,
-  formato,
-  onVolver,
-}: {
-  torneoPartidoId: string;
-  partidaOnlineId: string;
-  formato: string;
-  onVolver: () => void;
-}) {
-  const [partida, setPartida] = useState<PartidaOnline | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const disparandoRef = useRef(false);
-
-  useEffect(() => {
-    let cancelado = false;
-
-    async function consultar() {
-      try {
-        const p = await fetchPartida(partidaOnlineId);
-        if (cancelado || !p) return;
-        setPartida(p);
-        setError(null);
-
-        if (p.estado === "jugando" && !disparandoRef.current) {
-          disparandoRef.current = true;
-          avanzarPartidoTorneoEnVivo({
-            data: { torneo_partido_id: torneoPartidoId, partida_online_id: partidaOnlineId, formato },
-          })
-            .catch(() => {})
-            .finally(() => { disparandoRef.current = false; });
-        }
-      } catch (e) {
-        if (!cancelado) setError(e instanceof Error ? e.message : "No se pudo cargar el partido.");
-      }
-    }
-
-    consultar();
-    const id = setInterval(consultar, POLL_PARTIDA_MS);
-    return () => { cancelado = true; clearInterval(id); };
-  }, [partidaOnlineId, torneoPartidoId, formato]);
-
-  const state = useMemo(
-    () => (partida?.match_state ? deserializeMatchState(partida.match_state) : null),
-    [partida?.match_state],
-  );
-
-  if (error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4">
-        <div className="text-center">
-          <p className="text-sm text-destructive-foreground bg-destructive rounded px-3 py-2">{error}</p>
-          <button className="btn-secondary mt-4" onClick={onVolver}>← Volver al torneo</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!partida || !state) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
-        <p className="text-muted-foreground">Cargando partido...</p>
-      </div>
-    );
-  }
-
-  const [teamA, teamB] = state.teams;
-  const [posA, posB] = possessionPct(state);
-  const displayMinute = state.minute > 90 ? `90+${state.minute - 90}` : `${state.minute}`;
-
-  return (
-    <div className="min-h-screen bg-background text-foreground pb-16">
-      <div className="sticky top-0 z-20 bg-pitch text-pitch-foreground shadow-md">
-        <div className="max-w-3xl mx-auto px-4 py-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-          <div className="text-right min-w-0">
-            <div className="font-display font-black text-sm sm:text-base truncate">{teamA.config.name}</div>
-            <div className="text-[10px] uppercase tracking-wider text-lime-200/70">
-              {teamA.formation} · {teamA.style}
-            </div>
-          </div>
-          <div className="text-center">
-            <div className="font-display text-3xl sm:text-4xl font-black tabular-nums">
-              {teamA.goals} : {teamB.goals}
-            </div>
-            <div className="text-[11px] tracking-[0.2em] uppercase text-lime-200/80 mt-0.5">
-              {state.finished ? "Final" : `${displayMinute}'`}
-            </div>
-          </div>
-          <div className="text-left min-w-0">
-            <div className="font-display font-black text-sm sm:text-base truncate">{teamB.config.name}</div>
-            <div className="text-[10px] uppercase tracking-wider text-lime-200/70">
-              {teamB.formation} · {teamB.style}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-3xl mx-auto px-4 mt-4">
-        <div className="card p-3 text-xs flex items-center justify-between">
-          <span>Posesión</span>
-          <span className="font-display tabular-nums">{posA}% · {posB}%</span>
-        </div>
-        {state.finished && (
-          <div className="card p-3 mt-3 text-center bg-primary/10 border border-primary/30">
-            <p className="text-sm">Este partido ya terminó.</p>
-            <button className="btn-primary mt-2" onClick={onVolver}>Volver al torneo →</button>
-          </div>
-        )}
-        <div className="mt-3 space-y-2">
-          {[...state.events].reverse().map((ev, i) => (
-            <div key={i} className="card p-3 text-sm">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{ev.minute}'</div>
-              <div className="mt-0.5">{ev.text}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-</file>
-
 <file path="src/components/online/OnlineEquipoSelector.tsx">
 'use client';
 /**
@@ -8542,31 +8122,32 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 </file>
 
 <file path="src/routes/api/resolver-torneos.ts">
-import { createAPIFileRoute } from "@tanstack/react-start/api";
+import { createFileRoute } from "@tanstack/react-router";
 import { resolverPartidosVencidos } from "@/lib/football/tournament-cron";
 
-export const APIRoute = createAPIFileRoute("/api/resolver-torneos")({
-  POST: async ({ request }) => {
-    const secreto = request.headers.get("x-resolver-secret");
-    if (!secreto || secreto !== process.env.TORNEO_RESOLVER_SECRET) {
-      return new Response(JSON.stringify({ error: "No autorizado." }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+export const Route = createFileRoute("/api/resolver-torneos")({
+  server: {
+    handlers: {
+      POST: async ({ request }) => {
+        const secreto = request.headers.get("x-resolver-secret");
+        if (!secreto || secreto !== process.env.TORNEO_RESOLVER_SECRET) {
+          return new Response(JSON.stringify({ error: "No autorizado." }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
 
-    try {
-      const resultado = await resolverPartidosVencidos();
-      return new Response(JSON.stringify(resultado), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    } catch (e) {
-      return new Response(
-        JSON.stringify({ error: e instanceof Error ? e.message : "Error desconocido." }),
-        { status: 500, headers: { "Content-Type": "application/json" } },
-      );
-    }
+        try {
+          const resultado = await resolverPartidosVencidos();
+          return Response.json(resultado);
+        } catch (e) {
+          return new Response(
+            JSON.stringify({ error: e instanceof Error ? e.message : "Error desconocido." }),
+            { status: 500, headers: { "Content-Type": "application/json" } },
+          );
+        }
+      },
+    },
   },
 });
 </file>
@@ -9594,6 +9175,26 @@ create policy "torneo_partidos_update_horario_admin"
   );
 </file>
 
+<file path="supabase/migrations/20260809204500_activar_cron_resolver_torneos.sql">
+create extension if not exists pg_cron with schema extensions;
+create extension if not exists pg_net with schema extensions;
+
+select cron.schedule(
+  'resolver-torneos-online',
+  '* * * * *',
+  $$
+  select net.http_post(
+    url := 'https://tecnico-de-la-cancha.vercel.app/api/resolver-torneos',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-resolver-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'torneo_resolver_secret')
+    ),
+    body := '{}'::jsonb
+  );
+  $$
+);
+</file>
+
 <file path=".gitignore">
 # Logs
 logs
@@ -10526,6 +10127,406 @@ export function TournamentListScreen() {
               </div>
             ),
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="src/components/football/TournamentMatchScreen.tsx">
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useGame } from "@/lib/football/store";
+import { fetchTorneoPartido, fetchTorneo } from "@/lib/football/tournament-api";
+import { fetchPartida } from "@/lib/online/api";
+import { avanzarPartidoTorneoEnVivo } from "@/lib/football/tournament-live-server-fns";
+import { deserializeMatchState } from "@/lib/football/serialization";
+import { possessionPct } from "@/lib/football/engine";
+import type { TournamentFixtureMatch } from "@/lib/football/tournament-types";
+import type { PartidaOnline } from "@/lib/online/types";
+
+const MENSAJES_ESPERA = [
+  "Los jugadores están entrando en calor.",
+  "El árbitro revisa la cancha antes del pitazo inicial.",
+  "Todavía estás a tiempo de hacer un último cambio táctico.",
+  "El DT rival ya confirmó su alineación.",
+  "Se siente la previa en el vestuario...",
+  "__FALTAN_X__",
+  "Los equipos terminan de ajustar los últimos detalles.",
+  "El cuerpo técnico prepara las últimas indicaciones.",
+  "Últimos minutos antes de que ruede la pelota.",
+  "El árbitro y sus asistentes ultiman los preparativos.",
+  "Las tribunas comienzan a llenarse.",
+  "La tensión crece a medida que se acerca el comienzo.",
+  "Los jugadores esperan la señal para salir.",
+  "Últimos ajustes en la formación.",
+  "El DT revisa por última vez el planteamiento.",
+  "Se repasan las instrucciones tácticas antes de salir.",
+  "La previa llega a sus últimos instantes.",
+  "Los protagonistas están a punto de salir.",
+  "El equipo rival termina su calentamiento.",
+  "Se ultiman los detalles del espectáculo.",
+  "La pelota espera por sus protagonistas.",
+  "El ambiente se empieza a encender.",
+  "Cada minuto que pasa nos acerca al pitazo inicial.",
+  "Los últimos minutos de espera pueden cambiarlo todo.",
+  "El cuarto árbitro verifica que todo esté en orden.",
+  "Los equipos reciben la última autorización para salir.",
+  "En cualquier momento, comienza el espectáculo.",
+  "Los últimos ajustes pueden marcar la diferencia.",
+  "Noventa minutos para demostrar el trabajo de toda la semana.",
+  "El planteamiento está listo para ponerse a prueba.",
+  "Los jugadores esperan las últimas órdenes del cuerpo técnico.",
+  "Un último vistazo a la táctica antes de salir.",
+  "El rival ya está preparado. ¿Tu equipo también?",
+  "La concentración es máxima en ambos vestuarios.",
+  "Todo lo trabajado está a punto de ponerse a prueba.",
+  "El partido se gana en la cancha, pero la preparación empieza antes.",
+  "La pelota todavía no rueda, pero el partido ya se empieza a jugar.",
+  "La espera está por terminar. La decisión queda en manos de los protagonistas.",
+];
+
+const POLL_MS = 5000;
+const ROTACION_MS = 5000;
+
+/** Baraja un array (Fisher-Yates), sin mutar el original. */
+function barajar<T>(arr: T[]): T[] {
+  const copia = [...arr];
+  for (let i = copia.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copia[i], copia[j]] = [copia[j], copia[i]];
+  }
+  return copia;
+}
+
+function formatearMensaje(mensaje: string, minutosRestantes: number): string {
+  if (mensaje === "__FALTAN_X__") {
+    const min = Math.max(0, Math.round(minutosRestantes));
+    return `Faltan ${min} minuto${min === 1 ? "" : "s"} para el pitazo inicial.`;
+  }
+  return mensaje;
+}
+
+export function TournamentMatchScreen() {
+  const { tournamentLiveMatchId, tournamentId, setScreen } = useGame();
+
+  const [match, setMatch] = useState<TournamentFixtureMatch | null>(null);
+  const [formato, setFormato] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+  const [transicionando, setTransicionando] = useState(false);
+
+  // ── Bolsa sin repetición para los mensajes rotativos ──────────────────────
+  const bolsaRef = useRef<string[]>(barajar(MENSAJES_ESPERA));
+  const [indiceMensaje, setIndiceMensaje] = useState(0);
+  const [mensajeVisible, setMensajeVisible] = useState(true);
+
+  // Formato del torneo (necesario para saber si un empate al terminar el
+  // partido va a penales) — se trae una sola vez, es un dato que no cambia.
+  useEffect(() => {
+    if (!tournamentId) return;
+    fetchTorneo(tournamentId)
+      .then((t) => setFormato(t.format))
+      .catch(() => {});
+  }, [tournamentId]);
+
+  // ── Polling del estado del partido ─────────────────────────────────────────
+  useEffect(() => {
+    if (!tournamentLiveMatchId) return;
+    let cancelado = false;
+
+    async function consultar() {
+      try {
+        const m = await fetchTorneoPartido(tournamentLiveMatchId!);
+        if (cancelado) return;
+        setMatch((anterior) => {
+          if (anterior && anterior.status === "pendiente" && m.status === "en_curso") {
+            setTransicionando(true);
+            if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+              new Notification("¡Arrancó tu partido de torneo!");
+            }
+            setTimeout(() => setTransicionando(false), 2000);
+          }
+          return m;
+        });
+        setError(null);
+      } catch (e) {
+        if (!cancelado) setError(e instanceof Error ? e.message : "No se pudo cargar el partido.");
+      }
+    }
+
+    consultar();
+    const id = setInterval(consultar, POLL_MS);
+    return () => { cancelado = true; clearInterval(id); };
+  }, [tournamentLiveMatchId]);
+
+  useEffect(() => {
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, []);
+
+  // ── Rotación de mensajes (bolsa sin repetición) ────────────────────────────
+  useEffect(() => {
+    if (!match || match.status !== "pendiente") return;
+    const id = setInterval(() => {
+      setMensajeVisible(false);
+      setTimeout(() => {
+        setIndiceMensaje((i) => {
+          const siguiente = i + 1;
+          if (siguiente >= bolsaRef.current.length) {
+            bolsaRef.current = barajar(MENSAJES_ESPERA);
+            return 0;
+          }
+          return siguiente;
+        });
+        setMensajeVisible(true);
+      }, 400);
+    }, ROTACION_MS);
+    return () => clearInterval(id);
+  }, [match?.status]);
+
+  const minutosRestantes = useMemo(() => {
+    if (!match?.scheduledAt) return 0;
+    const diffMs = new Date(match.scheduledAt).getTime() - Date.now();
+    return diffMs / 60000;
+  }, [match?.scheduledAt]);
+
+  if (!tournamentLiveMatchId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+        <div className="text-center">
+          <p>No hay ningún partido en seguimiento.</p>
+          <button className="btn-primary mt-4" onClick={() => setScreen("tournament_hub")}>← Volver al torneo</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4">
+        <div className="text-center">
+          <p className="text-sm text-destructive-foreground bg-destructive rounded px-3 py-2">{error}</p>
+          <button className="btn-primary mt-4" onClick={() => setScreen("tournament_hub")}>← Volver al torneo</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!match) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+        <p className="text-muted-foreground">Cargando partido...</p>
+      </div>
+    );
+  }
+
+  if (match.status === "jugado" || match.status === "walkover") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4">
+        <div className="text-center">
+          <p>Este partido ya terminó.</p>
+          <button className="btn-primary mt-4" onClick={() => setScreen("tournament_hub")}>
+            Ver resultado en el torneo →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (transicionando) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-pitch text-pitch-foreground">
+        <div className="text-center animate-pulse">
+          <div className="text-4xl">⚽</div>
+          <p className="font-display text-2xl font-black mt-3">¡Arrancó el partido!</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (match.status === "en_curso") {
+    if (!match.partidaOnlineId || !formato) {
+      // Ventana chica entre que el vigilante marca "en_curso" y crea la
+      // partidas_online (o mientras todavía no llegó el fetch del formato) —
+      // se resuelve solo en el próximo poll (5s).
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+          <p className="text-muted-foreground">Preparando el partido...</p>
+        </div>
+      );
+    }
+    return (
+      <TournamentLiveMatchView
+        torneoPartidoId={match.id}
+        partidaOnlineId={match.partidaOnlineId}
+        formato={formato}
+        onVolver={() => setScreen("tournament_hub")}
+      />
+    );
+  }
+
+  // Sala de espera (status === "pendiente")
+  const mensajeActual = formatearMensaje(bolsaRef.current[indiceMensaje], minutosRestantes);
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-pitch text-pitch-foreground px-6">
+      <button
+        className="absolute top-4 left-4 text-xs text-pitch-foreground/70 hover:text-pitch-foreground"
+        onClick={() => setScreen("tournament_hub")}
+      >
+        ← Volver al torneo
+      </button>
+      <div className="text-xs uppercase tracking-[0.3em] text-lime-300/80">Sala de espera</div>
+      <div className="mt-3 font-display text-3xl font-black">
+        {match.scheduledAt
+          ? new Date(match.scheduledAt).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" })
+          : "Horario a confirmar"}
+      </div>
+      <div className="mt-10 h-16 flex items-center justify-center max-w-md text-center">
+        <p
+          className={`text-lime-100/90 transition-all duration-500 ${
+            mensajeVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2"
+          }`}
+        >
+          {mensajeActual}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+const POLL_PARTIDA_MS = 5000;
+
+/**
+ * Vista de partido de torneo online en vivo. A diferencia de
+ * OnlineMatchScreen, NO usa OnlineGameProvider (ese contexto asume un
+ * modelo de "jugadores uniéndose a una sala", que no aplica acá — cada
+ * lado ya es dueño de un torneo_slot desde antes). Lee partidas_online
+ * directo con fetchPartida, y dispara avanzarPartidoTorneoEnVivo cada
+ * pocos segundos para que el partido avance suave mientras alguien mira
+ * — es seguro llamarla más de una vez o desde varios espectadores a la
+ * vez, calcula el minuto objetivo por tiempo real transcurrido, no por
+ * cuántas veces se invoca. Sin controles de velocidad ni panel táctico
+ * todavía (eso queda para una pasada de pulido posterior) — por ahora es
+ * de solo mirar, ideal para cuando el dueño del equipo no está presente.
+ */
+function TournamentLiveMatchView({
+  torneoPartidoId,
+  partidaOnlineId,
+  formato,
+  onVolver,
+}: {
+  torneoPartidoId: string;
+  partidaOnlineId: string;
+  formato: string;
+  onVolver: () => void;
+}) {
+  const [partida, setPartida] = useState<PartidaOnline | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const disparandoRef = useRef(false);
+
+  useEffect(() => {
+    let cancelado = false;
+
+    async function consultar() {
+      try {
+        const p = await fetchPartida(partidaOnlineId);
+        if (cancelado || !p) return;
+        setPartida(p);
+        setError(null);
+
+        if (p.estado === "jugando" && !disparandoRef.current) {
+          disparandoRef.current = true;
+          avanzarPartidoTorneoEnVivo({
+            data: { torneo_partido_id: torneoPartidoId, partida_online_id: partidaOnlineId, formato },
+          })
+            .catch(() => {})
+            .finally(() => { disparandoRef.current = false; });
+        }
+      } catch (e) {
+        if (!cancelado) setError(e instanceof Error ? e.message : "No se pudo cargar el partido.");
+      }
+    }
+
+    consultar();
+    const id = setInterval(consultar, POLL_PARTIDA_MS);
+    return () => { cancelado = true; clearInterval(id); };
+  }, [partidaOnlineId, torneoPartidoId, formato]);
+
+  const state = useMemo(
+    () => (partida?.match_state ? deserializeMatchState(partida.match_state) : null),
+    [partida?.match_state],
+  );
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4">
+        <div className="text-center">
+          <p className="text-sm text-destructive-foreground bg-destructive rounded px-3 py-2">{error}</p>
+          <button className="btn-secondary mt-4" onClick={onVolver}>← Volver al torneo</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!partida || !state) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+        <p className="text-muted-foreground">Cargando partido...</p>
+      </div>
+    );
+  }
+
+  const [teamA, teamB] = state.teams;
+  const [posA, posB] = possessionPct(state);
+  const displayMinute = state.minute > 90 ? `90+${state.minute - 90}` : `${state.minute}`;
+
+  return (
+    <div className="min-h-screen bg-background text-foreground pb-16">
+      <div className="sticky top-0 z-20 bg-pitch text-pitch-foreground shadow-md">
+        <div className="max-w-3xl mx-auto px-4 py-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+          <div className="text-right min-w-0">
+            <div className="font-display font-black text-sm sm:text-base truncate">{teamA.config.name}</div>
+            <div className="text-[10px] uppercase tracking-wider text-lime-200/70">
+              {teamA.formation} · {teamA.style}
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="font-display text-3xl sm:text-4xl font-black tabular-nums">
+              {teamA.goals} : {teamB.goals}
+            </div>
+            <div className="text-[11px] tracking-[0.2em] uppercase text-lime-200/80 mt-0.5">
+              {state.finished ? "Final" : `${displayMinute}'`}
+            </div>
+          </div>
+          <div className="text-left min-w-0">
+            <div className="font-display font-black text-sm sm:text-base truncate">{teamB.config.name}</div>
+            <div className="text-[10px] uppercase tracking-wider text-lime-200/70">
+              {teamB.formation} · {teamB.style}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-3xl mx-auto px-4 mt-4">
+        <div className="card p-3 text-xs flex items-center justify-between">
+          <span>Posesión</span>
+          <span className="font-display tabular-nums">{posA}% · {posB}%</span>
+        </div>
+        {state.finished && (
+          <div className="card p-3 mt-3 text-center bg-primary/10 border border-primary/30">
+            <p className="text-sm">Este partido ya terminó.</p>
+            <button className="btn-primary mt-2" onClick={onVolver}>Volver al torneo →</button>
+          </div>
+        )}
+        <div className="mt-3 space-y-2">
+          {[...state.events].reverse().map((ev, i) => (
+            <div key={i} className="card p-3 text-sm">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{ev.minute}'</div>
+              <div className="mt-0.5">{ev.text}</div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -12169,33 +12170,43 @@ function RootComponent() {
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiResolverTorneosRouteImport } from './routes/api/resolver-torneos'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiResolverTorneosRoute = ApiResolverTorneosRouteImport.update({
+  id: '/api/resolver-torneos',
+  path: '/api/resolver-torneos',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/resolver-torneos': typeof ApiResolverTorneosRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/resolver-torneos': typeof ApiResolverTorneosRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api/resolver-torneos': typeof ApiResolverTorneosRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/api/resolver-torneos'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/api/resolver-torneos'
+  id: '__root__' | '/' | '/api/resolver-torneos'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiResolverTorneosRoute: typeof ApiResolverTorneosRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -12207,11 +12218,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/resolver-torneos': {
+      id: '/api/resolver-torneos'
+      path: '/api/resolver-torneos'
+      fullPath: '/api/resolver-torneos'
+      preLoaderRoute: typeof ApiResolverTorneosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApiResolverTorneosRoute: ApiResolverTorneosRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
@@ -16810,475 +16829,6 @@ function ApiMode({
 }
 </file>
 
-<file path="src/components/football/TournamentHubScreen.tsx">
-import { useEffect, useState } from "react";
-import { useGame } from "@/lib/football/store";
-import { useAuth } from "@/hooks/use-auth";
-import { fetchTorneo, fetchSlots, fetchFixture, teamFromSlot, avanzarRondaSiCorresponde, finalizarLigaSiCorresponde, asignarHoraPartido, esAdminDeTorneo } from "@/lib/football/tournament-api";
-import { resolverPartidoAutomatico } from "@/lib/football/tournament-bot-resolve";
-import { computeStandings } from "@/lib/football/tournament-standings";
-import type { Tournament, TournamentSlot, TournamentFixtureMatch } from "@/lib/football/tournament-types";
-
-export function TournamentHubScreen() {
-  const {
-    tournamentId, reset, setScreen, setSettings, setTeams,
-    setActiveLockerTeam, setTournamentActiveMatchId, setTournamentActiveMatchIsKnockout,
-    setTournamentLiveMatchId,
-  } = useGame();
-  const { user } = useAuth();
-
-  const [tournament, setTournament] = useState<Tournament | null>(null);
-  const [slots, setSlots] = useState<TournamentSlot[]>([]);
-  const [fixture, setFixture] = useState<TournamentFixtureMatch[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [resolviendoId, setResolviendoId] = useState<string | null>(null);
-  const [horarioElegido, setHorarioElegido] = useState("");
-  const [guardandoHorario, setGuardandoHorario] = useState(false);
-  const [soyAdminTorneo, setSoyAdminTorneo] = useState(false);
-
-
-  useEffect(() => {
-    if (!tournamentId) return;
-    let cancelado = false;
-    async function cargar() {
-      setLoading(true);
-      try {
-        // Red de seguridad: si por una conexión lenta el resultado del
-        // partido anterior llegó a Supabase después de que StatsScreen ya
-        // había intentado avanzar de ronda, esto lo vuelve a intentar acá.
-        // Es idempotente (avanzarRondaSiCorresponde ya lo garantiza), así
-        // que no hace nada si no hace falta.
-        await avanzarRondaSiCorresponde(tournamentId!).catch((err) => {
-          console.error("No se pudo avanzar de ronda al entrar al hub:", err);
-        });
-        await finalizarLigaSiCorresponde(tournamentId!).catch((err) => {
-          console.error("No se pudo verificar el fin de la liga al entrar al hub:", err);
-        });
-        const [t, s, f] = await Promise.all([
-          fetchTorneo(tournamentId!),
-          fetchSlots(tournamentId!),
-          fetchFixture(tournamentId!),
-        ]);
-        if (cancelado) return;
-        setTournament(t);
-        setSlots(s);
-        setFixture(f);
-        setError(null);
-        if (t.isOnline) {
-          esAdminDeTorneo(tournamentId!)
-            .then((esAdmin) => { if (!cancelado) setSoyAdminTorneo(esAdmin); })
-            .catch(() => { if (!cancelado) setSoyAdminTorneo(false); });
-        }
-      } catch (e) {
-        if (!cancelado) setError(e instanceof Error ? e.message : "No se pudo cargar el torneo.");
-      } finally {
-        if (!cancelado) setLoading(false);
-      }
-    }
-    cargar();
-    return () => { cancelado = true; };
-  }, [tournamentId]);
-
-  if (!tournamentId) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
-        <div className="text-center">
-          <p>No hay ningún torneo activo.</p>
-          <button className="btn-primary mt-4" onClick={() => setScreen("home")}>Volver al inicio</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (loading || !tournament) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
-        <p className="text-muted-foreground">Cargando torneo...</p>
-      </div>
-    );
-  }
-
-  function formatHorario(fechaISO: string | undefined): string {
-    if (!fechaISO) return "Sin horario asignado";
-    const d = new Date(fechaISO);
-    return d.toLocaleString(undefined, {
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-
-  const nombreSlot = (id: string) => slots.find((s) => s.id === id)?.displayName ?? "?";
-  const esBot = (id: string) => slots.find((s) => s.id === id)?.teamConfig.isBot ?? false;
-  const esLiga = tournament.format !== "eliminacion_directa";
-  const standings = esLiga ? computeStandings(slots, fixture) : [];
-
-  const miSlotId = slots.find((s) => s.ownerUserId === user?.id)?.id;
-  const pendientes = fixture
-    .filter((m) => m.status === "pendiente")
-    .sort((a, b) => {
-      // Priorizar partidos donde el usuario es partícipe
-      const aEsMio = a.homeSlotId === miSlotId || a.awaySlotId === miSlotId;
-      const bEsMio = b.homeSlotId === miSlotId || b.awaySlotId === miSlotId;
-      if (aEsMio && !bEsMio) return -1;
-      if (!aEsMio && bEsMio) return 1;
-      // Si ambos son míos o ninguno, ordenar por ronda
-      return a.round - b.round;
-    });
-  const proximo = pendientes[0] ?? null;
-  const jugados = fixture.filter((m) => m.status === "jugado");
-
-  function jugarPartido(m: TournamentFixtureMatch) {
-    const home = slots.find((s) => s.id === m.homeSlotId);
-    const away = slots.find((s) => s.id === m.awaySlotId);
-    if (!home || !away || !tournament) return;
-    setSettings(tournament.matchSettingsTemplate);
-    setTeams([teamFromSlot(home), teamFromSlot(away)]);
-    setActiveLockerTeam(0);
-    setTournamentActiveMatchId(m.id);
-    setTournamentActiveMatchIsKnockout(tournament.format === "eliminacion_directa");
-    setScreen("handoff");
-  }
-
-  async function guardarHorario(m: TournamentFixtureMatch) {
-    if (!horarioElegido || !tournamentId) return;
-    setGuardandoHorario(true);
-    setError(null);
-    try {
-      await asignarHoraPartido(m.id, new Date(horarioElegido).toISOString());
-      const f = await fetchFixture(tournamentId);
-      setFixture(f);
-      setHorarioElegido("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo guardar el horario.");
-    } finally {
-      setGuardandoHorario(false);
-    }
-  }
-
-  async function resolverAutomatico(m: TournamentFixtureMatch) {
-    const home = slots.find((s) => s.id === m.homeSlotId);
-    const away = slots.find((s) => s.id === m.awaySlotId);
-    if (!home || !away || !tournament || !tournamentId) return;
-    setResolviendoId(m.id);
-    setError(null);
-    try {
-      await resolverPartidoAutomatico({
-        match: m,
-        home,
-        away,
-        matchSettings: tournament.matchSettingsTemplate,
-        esEliminacionDirecta: tournament.format === "eliminacion_directa",
-      });
-      await avanzarRondaSiCorresponde(tournamentId);
-      await finalizarLigaSiCorresponde(tournamentId);
-      const [t, s, f] = await Promise.all([
-        fetchTorneo(tournamentId),
-        fetchSlots(tournamentId),
-        fetchFixture(tournamentId),
-      ]);
-      setTournament(t);
-      setSlots(s);
-      setFixture(f);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo resolver el partido automáticamente.");
-    } finally {
-      setResolviendoId(null);
-    }
-  }
-
-  return (
-    <div className="min-h-screen bg-background text-foreground px-4 py-8">
-      <div className="max-w-2xl mx-auto">
-        <button className="btn-ghost mb-4" onClick={reset}>← Salir del torneo</button>
-        <div className="flex items-center justify-between gap-3">
-          <h1 className="font-display text-3xl font-black">{tournament.name}</h1>
-          {slots.some((s) => s.ownerUserId === user?.id) && (
-            <button className="btn-secondary text-sm shrink-0" onClick={() => setScreen("tournament_locker")}>
-              Mi vestuario
-            </button>
-          )}
-        </div>
-        <p className="text-muted-foreground text-sm mt-1">
-          {esLiga
-            ? `Jornada ${proximo?.round ?? tournament.totalRounds} de ${tournament.totalRounds}`
-            : `Ronda ${tournament.currentRound} de ${tournament.totalRounds}`}
-          {" "}·{" "}
-          {tournament.format === "eliminacion_directa"
-            ? "Copa"
-            : tournament.format === "liga_ida_vuelta"
-              ? "Liga (ida y vuelta)"
-              : "Liga"}
-        </p>
-
-        {error && (
-          <p className="text-xs text-destructive-foreground bg-destructive rounded px-2 py-1 mt-3">{error}</p>
-        )}
-
-        {/* Próximo partido */}
-        <div className="card p-4 mt-6">
-          <h2 className="font-display text-lg font-bold">Próximo partido</h2>
-          {proximo ? (
-            <div className="mt-3 space-y-3">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div>
-                  <div className="font-medium">
-                    {nombreSlot(proximo.homeSlotId)} vs {nombreSlot(proximo.awaySlotId)}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    Ronda {proximo.round}
-                    {tournament.isOnline && proximo.scheduledAt && (
-                      <span className="ml-2">· {formatHorario(proximo.scheduledAt)}</span>
-                    )}
-                  </div>
-                </div>
-                {!tournament.isOnline && (
-                  <>
-                    {esBot(proximo.homeSlotId) && esBot(proximo.awaySlotId) ? (
-                      <button
-                        className="btn-secondary disabled:opacity-50"
-                        disabled={resolviendoId === proximo.id}
-                        onClick={() => resolverAutomatico(proximo)}
-                      >
-                        {resolviendoId === proximo.id ? "Resolviendo..." : "Resolver automático"}
-                      </button>
-                    ) : (
-                      <button className="btn-primary" onClick={() => jugarPartido(proximo)}>
-                        Jugar →
-                      </button>
-                    )}
-                  </>
-                )}
-                {tournament.isOnline && (
-                  <>
-                    {proximo.scheduledAt && (
-                      <button
-                        className="btn-primary"
-                        onClick={() => { setTournamentLiveMatchId(proximo.id); setScreen("tournament_match_live"); }}
-                      >
-                        Ver partido →
-                      </button>
-                    )}
-                    {!proximo.scheduledAt && soyAdminTorneo && tournament.modoHorario === "manual" && (
-                      <div className="flex flex-col items-end gap-1 w-full sm:w-auto">
-                        <input
-                          type="datetime-local"
-                          className="input text-xs w-full"
-                          value={horarioElegido}
-                          onChange={(e) => setHorarioElegido(e.target.value)}
-                          min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
-                        />
-                        <button
-                          className="btn-primary text-xs disabled:opacity-50 w-full"
-                          disabled={!horarioElegido || guardandoHorario}
-                          onClick={() => guardarHorario(proximo)}
-                        >
-                          {guardandoHorario ? "Guardando..." : "Asignar horario"}
-                        </button>
-                      </div>
-                    )}
-                    {!proximo.scheduledAt && soyAdminTorneo && tournament.modoHorario !== "manual" && (
-                      <span className="text-xs text-muted-foreground">
-                        El torneo usa horario automático. El sistema asignará la hora.
-                      </span>
-                    )}
-                    {!proximo.scheduledAt && !soyAdminTorneo && (
-                      <span className="text-xs text-muted-foreground">Esperando que un admin asigne el horario.</span>
-                    )}
-                  </>
-                )}
-              </div>
-              {tournament.isOnline && proximo.scheduledAt && (
-                <div className="text-xs text-muted-foreground border-t border-border pt-2 mt-1">
-                  {new Date(proximo.scheduledAt) > new Date() ? (
-                    `El partido comenzará en ${Math.round((new Date(proximo.scheduledAt).getTime() - Date.now()) / 60000)} minutos.`
-                  ) : (
-                    "El partido debería estar en curso o ya terminó."
-                  )}
-                </div>
-              )}
-            </div>
-          ) : tournament.status === "finalizado" ? (
-            <div className="mt-3 flex items-center justify-between gap-3">
-              <p className="text-sm text-muted-foreground">El torneo ya terminó.</p>
-              <button className="btn-primary" onClick={() => setScreen("tournament_final")}>
-                Ver resumen →
-              </button>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground mt-2">
-              No quedan partidos pendientes en esta ronda.
-            </p>
-          )}
-        </div>
-
-        {/* Cuadro de eliminación (Copa) */}
-        {!esLiga && <TournamentBracket fixture={fixture} nombreSlot={nombreSlot} />}
-
-        {/* Tabla de posiciones */}
-        {esLiga && (
-          <div className="card p-4 mt-4">
-            <h2 className="font-display text-lg font-bold">Tabla de posiciones</h2>
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full text-xs sm:text-sm">
-                <thead>
-                  <tr className="text-muted-foreground text-left">
-                    <th className="py-1 pr-2">Equipo</th>
-                    <th className="px-1 text-center">PJ</th>
-                    <th className="px-1 text-center">G</th>
-                    <th className="px-1 text-center">E</th>
-                    <th className="px-1 text-center">P</th>
-                    <th className="px-1 text-center">DG</th>
-                    <th className="px-1 text-center">Pts</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {standings.map((r) => (
-                    <tr key={r.slotId} className="border-t border-border">
-                      <td className="py-1 pr-2">{nombreSlot(r.slotId)}</td>
-                      <td className="px-1 text-center">{r.played}</td>
-                      <td className="px-1 text-center">{r.won}</td>
-                      <td className="px-1 text-center">{r.drawn}</td>
-                      <td className="px-1 text-center">{r.lost}</td>
-                      <td className="px-1 text-center">{r.goalsFor - r.goalsAgainst}</td>
-                      <td className="px-1 text-center font-bold">{r.points}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Partidos jugados */}
-        {jugados.length > 0 && (
-          <div className="card p-4 mt-4">
-            <h2 className="font-display text-lg font-bold">Resultados</h2>
-            <ul className="mt-2 space-y-1 text-sm">
-              {jugados.map((m) => (
-                <li key={m.id} className="flex items-center justify-between">
-                  <span>{nombreSlot(m.homeSlotId)} vs {nombreSlot(m.awaySlotId)}</span>
-                  <span className="font-display font-bold">
-                    {m.result?.homeGoals} - {m.result?.awayGoals}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TournamentBracket({
-  fixture,
-  nombreSlot,
-}: {
-  fixture: TournamentFixtureMatch[];
-  nombreSlot: (id: string) => string;
-}) {
-  const rounds = Array.from(new Set(fixture.map((m) => m.round))).sort((a, b) => a - b);
-
-  return (
-    <div className="card p-4 mt-4">
-      <h2 className="font-display text-lg font-bold">Cuadro de eliminación</h2>
-      <div className="mt-3 flex gap-4 overflow-x-auto pb-2">
-        {rounds.map((round, i) => {
-          const partidos = fixture
-            .filter((m) => m.round === round)
-            .sort((a, b) => (a.bracketPosition ?? 0) - (b.bracketPosition ?? 0));
-          const esFinal = i === rounds.length - 1;
-          return (
-            <div key={round} className="min-w-[180px] flex-1">
-              <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2 text-center">
-                {esFinal ? "Final" : `Ronda ${round}`}
-              </div>
-              <div className="flex flex-col gap-3">
-                {partidos.map((m) => (
-                  <BracketMatch key={m.id} match={m} nombreSlot={nombreSlot} />
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function BracketMatch({
-  match,
-  nombreSlot,
-}: {
-  match: TournamentFixtureMatch;
-  nombreSlot: (id: string) => string;
-}) {
-  const jugado = match.status === "jugado";
-  let ganadorId: string | null = null;
-  if (jugado && match.result) {
-    ganadorId = match.result.penalties
-      ? (match.result.penalties.homeGoals > match.result.penalties.awayGoals ? match.homeSlotId : match.awaySlotId)
-      : (match.result.homeGoals >= match.result.awayGoals ? match.homeSlotId : match.awaySlotId);
-  } else if (match.status === "walkover") {
-    // No hay result explícito en un walkover — se muestra el cruce sin resaltar ganador.
-    ganadorId = null;
-  }
-
-  return (
-    <div className="rounded-lg border border-border overflow-hidden text-xs">
-      <BracketSlotRow
-        nombre={nombreSlot(match.homeSlotId)}
-        goles={match.result?.homeGoals}
-        penales={match.result?.penalties?.homeGoals}
-        esGanador={ganadorId === match.homeSlotId}
-        jugado={jugado}
-      />
-      <div className="border-t border-border" />
-      <BracketSlotRow
-        nombre={nombreSlot(match.awaySlotId)}
-        goles={match.result?.awayGoals}
-        penales={match.result?.penalties?.awayGoals}
-        esGanador={ganadorId === match.awaySlotId}
-        jugado={jugado}
-      />
-      {match.status === "walkover" && (
-        <div className="px-2 py-1 text-[10px] text-muted-foreground border-t border-border">Walkover</div>
-      )}
-    </div>
-  );
-}
-
-function BracketSlotRow({
-  nombre,
-  goles,
-  penales,
-  esGanador,
-  jugado,
-}: {
-  nombre: string;
-  goles?: number;
-  penales?: number;
-  esGanador: boolean;
-  jugado: boolean;
-}) {
-  return (
-    <div className={`flex items-center justify-between gap-2 px-2 py-1.5 ${esGanador ? "bg-primary/10 font-bold" : ""}`}>
-      <span className="truncate">{nombre}</span>
-      {jugado && (
-        <span className="tabular-nums shrink-0">
-          {goles}
-          {penales !== undefined ? ` (${penales})` : ""}
-        </span>
-      )}
-    </div>
-  );
-}
-</file>
-
 <file path="src/components/online/OnlineMatchScreen.tsx">
 'use client';
 /**
@@ -17901,6 +17451,1088 @@ function eventClass(kind: string, text?: string): string {
       if (text?.startsWith("[AVISO]")) return "border-l-4 border-yellow-400 bg-yellow-400/8";
       return "";
   }
+}
+</file>
+
+<file path="src/components/football/TournamentHubScreen.tsx">
+import { useEffect, useState } from "react";
+import { useGame } from "@/lib/football/store";
+import { useAuth } from "@/hooks/use-auth";
+import { fetchTorneo, fetchSlots, fetchFixture, teamFromSlot, avanzarRondaSiCorresponde, finalizarLigaSiCorresponde, asignarHoraPartido, esAdminDeTorneo } from "@/lib/football/tournament-api";
+import { resolverPartidoAutomatico } from "@/lib/football/tournament-bot-resolve";
+import { computeStandings } from "@/lib/football/tournament-standings";
+import type { Tournament, TournamentSlot, TournamentFixtureMatch } from "@/lib/football/tournament-types";
+
+export function TournamentHubScreen() {
+  const {
+    tournamentId, reset, setScreen, setSettings, setTeams,
+    setActiveLockerTeam, setTournamentActiveMatchId, setTournamentActiveMatchIsKnockout,
+    setTournamentLiveMatchId,
+  } = useGame();
+  const { user } = useAuth();
+
+  const [tournament, setTournament] = useState<Tournament | null>(null);
+  const [slots, setSlots] = useState<TournamentSlot[]>([]);
+  const [fixture, setFixture] = useState<TournamentFixtureMatch[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [resolviendoId, setResolviendoId] = useState<string | null>(null);
+  const [horarioElegido, setHorarioElegido] = useState("");
+  const [guardandoHorario, setGuardandoHorario] = useState(false);
+  const [soyAdminTorneo, setSoyAdminTorneo] = useState(false);
+  const [editandoHorario, setEditandoHorario] = useState(false);
+
+
+  useEffect(() => {
+    if (!tournamentId) return;
+    let cancelado = false;
+    async function cargar() {
+      setLoading(true);
+      try {
+        // Red de seguridad: si por una conexión lenta el resultado del
+        // partido anterior llegó a Supabase después de que StatsScreen ya
+        // había intentado avanzar de ronda, esto lo vuelve a intentar acá.
+        // Es idempotente (avanzarRondaSiCorresponde ya lo garantiza), así
+        // que no hace nada si no hace falta.
+        await avanzarRondaSiCorresponde(tournamentId!).catch((err) => {
+          console.error("No se pudo avanzar de ronda al entrar al hub:", err);
+        });
+        await finalizarLigaSiCorresponde(tournamentId!).catch((err) => {
+          console.error("No se pudo verificar el fin de la liga al entrar al hub:", err);
+        });
+        const [t, s, f] = await Promise.all([
+          fetchTorneo(tournamentId!),
+          fetchSlots(tournamentId!),
+          fetchFixture(tournamentId!),
+        ]);
+        if (cancelado) return;
+        setTournament(t);
+        setSlots(s);
+        setFixture(f);
+        setError(null);
+        if (t.isOnline) {
+          esAdminDeTorneo(tournamentId!)
+            .then((esAdmin) => { if (!cancelado) setSoyAdminTorneo(esAdmin); })
+            .catch(() => { if (!cancelado) setSoyAdminTorneo(false); });
+        }
+      } catch (e) {
+        if (!cancelado) setError(e instanceof Error ? e.message : "No se pudo cargar el torneo.");
+      } finally {
+        if (!cancelado) setLoading(false);
+      }
+    }
+    cargar();
+    return () => { cancelado = true; };
+  }, [tournamentId]);
+
+  if (!tournamentId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+        <div className="text-center">
+          <p>No hay ningún torneo activo.</p>
+          <button className="btn-primary mt-4" onClick={() => setScreen("home")}>Volver al inicio</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading || !tournament) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+        <p className="text-muted-foreground">Cargando torneo...</p>
+      </div>
+    );
+  }
+
+  function formatHorario(fechaISO: string | undefined): string {
+    if (!fechaISO) return "Sin horario asignado";
+    const d = new Date(fechaISO);
+    return d.toLocaleString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  const nombreSlot = (id: string) => slots.find((s) => s.id === id)?.displayName ?? "?";
+  const esBot = (id: string) => slots.find((s) => s.id === id)?.teamConfig.isBot ?? false;
+  const esLiga = tournament.format !== "eliminacion_directa";
+  const standings = esLiga ? computeStandings(slots, fixture) : [];
+
+  const miSlotId = slots.find((s) => s.ownerUserId === user?.id)?.id;
+  const pendientes = fixture
+    .filter((m) => m.status === "pendiente")
+    .sort((a, b) => {
+      // Priorizar partidos donde el usuario es partícipe
+      const aEsMio = a.homeSlotId === miSlotId || a.awaySlotId === miSlotId;
+      const bEsMio = b.homeSlotId === miSlotId || b.awaySlotId === miSlotId;
+      if (aEsMio && !bEsMio) return -1;
+      if (!aEsMio && bEsMio) return 1;
+      // Si ambos son míos o ninguno, ordenar por ronda
+      return a.round - b.round;
+    });
+  const proximo = pendientes[0] ?? null;
+  const jugados = fixture.filter((m) => m.status === "jugado");
+
+  function jugarPartido(m: TournamentFixtureMatch) {
+    const home = slots.find((s) => s.id === m.homeSlotId);
+    const away = slots.find((s) => s.id === m.awaySlotId);
+    if (!home || !away || !tournament) return;
+    setSettings(tournament.matchSettingsTemplate);
+    setTeams([teamFromSlot(home), teamFromSlot(away)]);
+    setActiveLockerTeam(0);
+    setTournamentActiveMatchId(m.id);
+    setTournamentActiveMatchIsKnockout(tournament.format === "eliminacion_directa");
+    setScreen("handoff");
+  }
+
+  async function guardarHorario(m: TournamentFixtureMatch) {
+    if (!horarioElegido || !tournamentId) return;
+    setGuardandoHorario(true);
+    setError(null);
+    try {
+      await asignarHoraPartido(m.id, new Date(horarioElegido).toISOString());
+      const f = await fetchFixture(tournamentId);
+      setFixture(f);
+      setHorarioElegido("");
+      setEditandoHorario(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar el horario.");
+    } finally {
+      setGuardandoHorario(false);
+    }
+  }
+
+  async function resolverAutomatico(m: TournamentFixtureMatch) {
+    const home = slots.find((s) => s.id === m.homeSlotId);
+    const away = slots.find((s) => s.id === m.awaySlotId);
+    if (!home || !away || !tournament || !tournamentId) return;
+    setResolviendoId(m.id);
+    setError(null);
+    try {
+      await resolverPartidoAutomatico({
+        match: m,
+        home,
+        away,
+        matchSettings: tournament.matchSettingsTemplate,
+        esEliminacionDirecta: tournament.format === "eliminacion_directa",
+      });
+      await avanzarRondaSiCorresponde(tournamentId);
+      await finalizarLigaSiCorresponde(tournamentId);
+      const [t, s, f] = await Promise.all([
+        fetchTorneo(tournamentId),
+        fetchSlots(tournamentId),
+        fetchFixture(tournamentId),
+      ]);
+      setTournament(t);
+      setSlots(s);
+      setFixture(f);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo resolver el partido automáticamente.");
+    } finally {
+      setResolviendoId(null);
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-background text-foreground px-4 py-8">
+      <div className="max-w-2xl mx-auto">
+        <button className="btn-ghost mb-4" onClick={reset}>← Salir del torneo</button>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="font-display text-3xl font-black">{tournament.name}</h1>
+          {slots.some((s) => s.ownerUserId === user?.id) && (
+            <button className="btn-secondary text-sm shrink-0" onClick={() => setScreen("tournament_locker")}>
+              Mi vestuario
+            </button>
+          )}
+        </div>
+        <p className="text-muted-foreground text-sm mt-1">
+          {esLiga
+            ? `Jornada ${proximo?.round ?? tournament.totalRounds} de ${tournament.totalRounds}`
+            : `Ronda ${tournament.currentRound} de ${tournament.totalRounds}`}
+          {" "}·{" "}
+          {tournament.format === "eliminacion_directa"
+            ? "Copa"
+            : tournament.format === "liga_ida_vuelta"
+              ? "Liga (ida y vuelta)"
+              : "Liga"}
+        </p>
+
+        {error && (
+          <p className="text-xs text-destructive-foreground bg-destructive rounded px-2 py-1 mt-3">{error}</p>
+        )}
+
+        {/* Próximo partido */}
+        <div className="card p-4 mt-6">
+          <h2 className="font-display text-lg font-bold">Próximo partido</h2>
+          {proximo ? (
+            <div className="mt-3 space-y-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <div className="font-medium">
+                    {nombreSlot(proximo.homeSlotId)} vs {nombreSlot(proximo.awaySlotId)}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Ronda {proximo.round}
+                    {tournament.isOnline && proximo.scheduledAt && (
+                      <span className="ml-2">· {formatHorario(proximo.scheduledAt)}</span>
+                    )}
+                  </div>
+                </div>
+                {!tournament.isOnline && (
+                  <>
+                    {esBot(proximo.homeSlotId) && esBot(proximo.awaySlotId) ? (
+                      <button
+                        className="btn-secondary disabled:opacity-50"
+                        disabled={resolviendoId === proximo.id}
+                        onClick={() => resolverAutomatico(proximo)}
+                      >
+                        {resolviendoId === proximo.id ? "Resolviendo..." : "Resolver automático"}
+                      </button>
+                    ) : (
+                      <button className="btn-primary" onClick={() => jugarPartido(proximo)}>
+                        Jugar →
+                      </button>
+                    )}
+                  </>
+                )}
+                {tournament.isOnline && (
+                  <>
+                    {proximo.scheduledAt && !editandoHorario && (
+                      <div className="flex flex-col items-end gap-1">
+                        <button
+                          className="btn-primary"
+                          onClick={() => { setTournamentLiveMatchId(proximo.id); setScreen("tournament_match_live"); }}
+                        >
+                          Ver partido →
+                        </button>
+                        {soyAdminTorneo && (
+                          <button
+                            className="text-xs text-muted-foreground underline"
+                            onClick={() => setEditandoHorario(true)}
+                          >
+                            Editar horario
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {proximo.scheduledAt && editandoHorario && soyAdminTorneo && (
+                      <div className="flex flex-col items-end gap-1 w-full sm:w-auto">
+                        <input
+                          type="datetime-local"
+                          className="input text-xs w-full"
+                          value={horarioElegido}
+                          onChange={(e) => setHorarioElegido(e.target.value)}
+                          min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+                        />
+                        <div className="flex gap-2 w-full">
+                          <button
+                            className="btn-secondary text-xs flex-1"
+                            onClick={() => { setEditandoHorario(false); setHorarioElegido(""); }}
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            className="btn-primary text-xs disabled:opacity-50 flex-1"
+                            disabled={!horarioElegido || guardandoHorario}
+                            onClick={() => guardarHorario(proximo)}
+                          >
+                            {guardandoHorario ? "Guardando..." : "Guardar"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {!proximo.scheduledAt && soyAdminTorneo && tournament.modoHorario === "manual" && (
+                      <div className="flex flex-col items-end gap-1 w-full sm:w-auto">
+                        <input
+                          type="datetime-local"
+                          className="input text-xs w-full"
+                          value={horarioElegido}
+                          onChange={(e) => setHorarioElegido(e.target.value)}
+                          min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+                        />
+                        <button
+                          className="btn-primary text-xs disabled:opacity-50 w-full"
+                          disabled={!horarioElegido || guardandoHorario}
+                          onClick={() => guardarHorario(proximo)}
+                        >
+                          {guardandoHorario ? "Guardando..." : "Asignar horario"}
+                        </button>
+                      </div>
+                    )}
+                    {!proximo.scheduledAt && soyAdminTorneo && tournament.modoHorario !== "manual" && (
+                      <span className="text-xs text-muted-foreground">
+                        El torneo usa horario automático. El sistema asignará la hora.
+                      </span>
+                    )}
+                    {!proximo.scheduledAt && !soyAdminTorneo && (
+                      <span className="text-xs text-muted-foreground">Esperando que un admin asigne el horario.</span>
+                    )}
+                  </>
+                )}
+              </div>
+              {tournament.isOnline && proximo.scheduledAt && (
+                <div className="text-xs text-muted-foreground border-t border-border pt-2 mt-1">
+                  {new Date(proximo.scheduledAt) > new Date() ? (
+                    `El partido comenzará en ${Math.round((new Date(proximo.scheduledAt).getTime() - Date.now()) / 60000)} minutos.`
+                  ) : (
+                    "El partido debería estar en curso o ya terminó."
+                  )}
+                </div>
+              )}
+            </div>
+          ) : tournament.status === "finalizado" ? (
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <p className="text-sm text-muted-foreground">El torneo ya terminó.</p>
+              <button className="btn-primary" onClick={() => setScreen("tournament_final")}>
+                Ver resumen →
+              </button>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground mt-2">
+              No quedan partidos pendientes en esta ronda.
+            </p>
+          )}
+        </div>
+
+        {/* Cuadro de eliminación (Copa) */}
+        {!esLiga && <TournamentBracket fixture={fixture} nombreSlot={nombreSlot} />}
+
+        {/* Tabla de posiciones */}
+        {esLiga && (
+          <div className="card p-4 mt-4">
+            <h2 className="font-display text-lg font-bold">Tabla de posiciones</h2>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-xs sm:text-sm">
+                <thead>
+                  <tr className="text-muted-foreground text-left">
+                    <th className="py-1 pr-2">Equipo</th>
+                    <th className="px-1 text-center">PJ</th>
+                    <th className="px-1 text-center">G</th>
+                    <th className="px-1 text-center">E</th>
+                    <th className="px-1 text-center">P</th>
+                    <th className="px-1 text-center">DG</th>
+                    <th className="px-1 text-center">Pts</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {standings.map((r) => (
+                    <tr key={r.slotId} className="border-t border-border">
+                      <td className="py-1 pr-2">{nombreSlot(r.slotId)}</td>
+                      <td className="px-1 text-center">{r.played}</td>
+                      <td className="px-1 text-center">{r.won}</td>
+                      <td className="px-1 text-center">{r.drawn}</td>
+                      <td className="px-1 text-center">{r.lost}</td>
+                      <td className="px-1 text-center">{r.goalsFor - r.goalsAgainst}</td>
+                      <td className="px-1 text-center font-bold">{r.points}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Partidos jugados */}
+        {jugados.length > 0 && (
+          <div className="card p-4 mt-4">
+            <h2 className="font-display text-lg font-bold">Resultados</h2>
+            <ul className="mt-2 space-y-1 text-sm">
+              {jugados.map((m) => (
+                <li key={m.id} className="flex items-center justify-between">
+                  <span>{nombreSlot(m.homeSlotId)} vs {nombreSlot(m.awaySlotId)}</span>
+                  <span className="font-display font-bold">
+                    {m.result?.homeGoals} - {m.result?.awayGoals}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TournamentBracket({
+  fixture,
+  nombreSlot,
+}: {
+  fixture: TournamentFixtureMatch[];
+  nombreSlot: (id: string) => string;
+}) {
+  const rounds = Array.from(new Set(fixture.map((m) => m.round))).sort((a, b) => a - b);
+
+  return (
+    <div className="card p-4 mt-4">
+      <h2 className="font-display text-lg font-bold">Cuadro de eliminación</h2>
+      <div className="mt-3 flex gap-4 overflow-x-auto pb-2">
+        {rounds.map((round, i) => {
+          const partidos = fixture
+            .filter((m) => m.round === round)
+            .sort((a, b) => (a.bracketPosition ?? 0) - (b.bracketPosition ?? 0));
+          const esFinal = i === rounds.length - 1;
+          return (
+            <div key={round} className="min-w-[180px] flex-1">
+              <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2 text-center">
+                {esFinal ? "Final" : `Ronda ${round}`}
+              </div>
+              <div className="flex flex-col gap-3">
+                {partidos.map((m) => (
+                  <BracketMatch key={m.id} match={m} nombreSlot={nombreSlot} />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BracketMatch({
+  match,
+  nombreSlot,
+}: {
+  match: TournamentFixtureMatch;
+  nombreSlot: (id: string) => string;
+}) {
+  const jugado = match.status === "jugado";
+  let ganadorId: string | null = null;
+  if (jugado && match.result) {
+    ganadorId = match.result.penalties
+      ? (match.result.penalties.homeGoals > match.result.penalties.awayGoals ? match.homeSlotId : match.awaySlotId)
+      : (match.result.homeGoals >= match.result.awayGoals ? match.homeSlotId : match.awaySlotId);
+  } else if (match.status === "walkover") {
+    // No hay result explícito en un walkover — se muestra el cruce sin resaltar ganador.
+    ganadorId = null;
+  }
+
+  return (
+    <div className="rounded-lg border border-border overflow-hidden text-xs">
+      <BracketSlotRow
+        nombre={nombreSlot(match.homeSlotId)}
+        goles={match.result?.homeGoals}
+        penales={match.result?.penalties?.homeGoals}
+        esGanador={ganadorId === match.homeSlotId}
+        jugado={jugado}
+      />
+      <div className="border-t border-border" />
+      <BracketSlotRow
+        nombre={nombreSlot(match.awaySlotId)}
+        goles={match.result?.awayGoals}
+        penales={match.result?.penalties?.awayGoals}
+        esGanador={ganadorId === match.awaySlotId}
+        jugado={jugado}
+      />
+      {match.status === "walkover" && (
+        <div className="px-2 py-1 text-[10px] text-muted-foreground border-t border-border">Walkover</div>
+      )}
+    </div>
+  );
+}
+
+function BracketSlotRow({
+  nombre,
+  goles,
+  penales,
+  esGanador,
+  jugado,
+}: {
+  nombre: string;
+  goles?: number;
+  penales?: number;
+  esGanador: boolean;
+  jugado: boolean;
+}) {
+  return (
+    <div className={`flex items-center justify-between gap-2 px-2 py-1.5 ${esGanador ? "bg-primary/10 font-bold" : ""}`}>
+      <span className="truncate">{nombre}</span>
+      {jugado && (
+        <span className="tabular-nums shrink-0">
+          {goles}
+          {penales !== undefined ? ` (${penales})` : ""}
+        </span>
+      )}
+    </div>
+  );
+}
+</file>
+
+<file path="src/components/football/LockerScreen.tsx">
+import { useEffect, useMemo, useState } from "react";
+import { useGame } from "@/lib/football/store";
+import { FORMATION_LIST, slotsFor, rowsFor, registerCustomFormation, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
+import { useFormacionesPersonalizadas } from "@/hooks/use-formaciones-personalizadas";
+import { FormationEditorModal } from "@/components/football/FormationEditorModal";
+import { autoLineup } from "@/lib/football/bot";
+import { computePlayerPositionRating } from "@/lib/football/engine";
+import {
+  ROLE_TABLE,
+  rolesForPosition,
+  roleEffect,
+  LINE_HEIGHT_TABLE,
+  BUILDUP_TABLE,
+  PRESS_TABLE,
+} from "@/lib/football/tactics";
+import type {
+  BuildUp,
+  FormationName,
+  LineHeight,
+  Player,
+  Position,
+  PositionGroup,
+  PressIntensity,
+  Style,
+  Team,
+} from "@/lib/football/types";
+import { POSITION_GROUP } from "@/lib/football/types";
+
+const POSITION_LABEL: Record<Position, string> = {
+  POR: "Arquero",
+  DFC: "Def. Central", LI: "Lateral Izq.", LD: "Lateral Der.", CAI: "Carrilero Izq.", CAD: "Carrilero Der.",
+  MCD: "Med. Defensivo", MC: "Med. Central", MI: "Med. Izquierdo", MD: "Med. Derecho", MCO: "Med. Ofensivo",
+  DC: "Del. Centro", SD: "Segundo Del.", EI: "Extremo Izq.", ED: "Extremo Der.",
+};
+const POSITION_SHORT: Record<Position, string> = {
+  POR: "POR",
+  DFC: "DFC", LI: "LI", LD: "LD", CAI: "CAI", CAD: "CAD",
+  MCD: "MCD", MC: "MC", MI: "MI", MD: "MD", MCO: "MCO",
+  DC: "DC", SD: "SD", EI: "EI", ED: "ED",
+};
+const GROUP_SHORT: Record<PositionGroup, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
+const avg = (a: number[]) => (a.length ? a.reduce((s, n) => s + n, 0) / a.length : 0);
+
+export function LockerScreen() {
+  const { setScreen, teams, activeLockerTeam, setActiveLockerTeam, settings, setTeams } = useGame();
+  const maybeTeam = teams[activeLockerTeam];
+  if (!maybeTeam) return null;
+  const team: Team = maybeTeam;
+  const otherIdx = activeLockerTeam === 0 ? 1 : 0;
+  const seeOwnRatings = settings.seeOwnRatings ?? true;
+
+  const [, forceTick] = useState(0);
+  const rerender = () => forceTick((n) => n + 1);
+  const [error, setError] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const { formaciones: formacionesPersonalizadas, guardar: guardarFormacion } = useFormacionesPersonalizadas();
+
+  // Registrar las formaciones personalizadas del usuario para que slotsFor/rowsFor las reconozcan por id.
+  useEffect(() => {
+    for (const f of formacionesPersonalizadas) registerCustomFormation(f.id, f.filas);
+  }, [formacionesPersonalizadas]);
+  const slots = useMemo(() => slotsFor(team.formation), [team.formation]);
+  const rows = useMemo(() => rowsFor(team.formation), [team.formation]);
+
+  function changeFormation(f: FormationName) {
+    team.formation = f;
+    team.starting = autoLineup(team.squad, f);
+    // Actualizar pateadores/capitán si dejaron de ser titulares
+    const starters = team.squad.filter((p) => team.starting.includes(p.id));
+    if (!team.captainId || !starters.some((p) => p.id === team.captainId)) team.captainId = starters[0]?.id;
+    if (!team.penaltyTakerId || !starters.some((p) => p.id === team.penaltyTakerId))
+      team.penaltyTakerId = [...starters].sort((a, b) => b.shooting - a.shooting)[0]?.id;
+    if (!team.setPieceTakerId || !starters.some((p) => p.id === team.setPieceTakerId))
+      team.setPieceTakerId = team.penaltyTakerId;
+    setError(null);
+    rerender();
+  }
+
+  function swapSlot(slotIndex: number, newPlayerId: string) {
+    const current = team.starting[slotIndex];
+    if (current === newPlayerId) return;
+    const otherSlot = team.starting.indexOf(newPlayerId);
+    if (otherSlot >= 0) {
+      // ya titular: intercambiar
+      team.starting[otherSlot] = current;
+    }
+    team.starting[slotIndex] = newPlayerId;
+    setError(null);
+    rerender();
+  }
+
+  function confirmTeam() {
+    // Validación: los 11 no vacíos y GK presente
+    if (team.starting.length !== 11 || team.starting.some((id) => !id)) {
+      setError("Faltan jugadores en la alineación.");
+      return;
+    }
+    const groupMap: Record<PositionGroup, number> = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+    team.starting.forEach((id, i) => {
+      const p = team.squad.find((pp) => pp.id === id);
+      const slotGroup = slotGroupForPosition(slots[i]) ?? "GK";
+      if (p) groupMap[slotGroup] += 1;
+    });
+    if (groupMap.GK < 1) {
+      setError("Falta el arquero en la alineación.");
+      return;
+    }
+    team.substitutionsLeft = settings.maxSubs;
+    // Guardar teams
+    setTeams([teams[0], teams[1]]);
+    // Siguiente pantalla: si hay otro humano por armar, handoff; si no, confirm
+    const other = teams[otherIdx];
+    if (other && !other.config.isBot && !(other as any)._armed) {
+      // marcar armado
+      (team as any)._armed = true;
+      setActiveLockerTeam(otherIdx as 0 | 1);
+      setScreen("handoff");
+      return;
+    }
+    (team as any)._armed = true;
+    // Si el otro es bot y no está armado, ir por handoff (auto arma bot); si ya está armado, confirm
+    if (other && other.config.isBot && !(other as any)._armed) {
+      setActiveLockerTeam(otherIdx as 0 | 1);
+      setScreen("handoff");
+    } else {
+      setScreen("confirm");
+    }
+  }
+
+  const starters = team.squad.filter((p) => team.starting.includes(p.id));
+  const bench = team.squad.filter((p) => !team.starting.includes(p.id));
+
+  return (
+    <div className="min-h-screen bg-background text-foreground pb-24">
+      <div className="max-w-4xl mx-auto px-4 py-6">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="h-5 w-5 rounded-full shrink-0" style={{ backgroundColor: team.config.color }} />
+            <h1 className="font-display text-2xl sm:text-3xl font-black truncate">{team.config.name} · Vestuario</h1>
+          </div>
+          {seeOwnRatings && (
+            <div className="text-xs text-muted-foreground">Promedio: {Math.round(starters.reduce((s, p, i) => s + computePlayerPositionRating(p, slots[i]), 0) / (starters.length || 1))}</div>
+          )}
+        </div>
+
+        {/* Táctica */}
+        <div className="card p-4 mt-5">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <div className="label">Formación</div>
+              <select className="input mt-1 w-full" value={team.formation}
+                onChange={(e) => changeFormation(e.target.value as FormationName)}>
+                <optgroup label="Predefinidas">
+                  {FORMATION_LIST.map((f) => <option key={f} value={f}>{f}</option>)}
+                </optgroup>
+                {formacionesPersonalizadas.length > 0 && (
+                  <optgroup label="Mis formaciones">
+                    {formacionesPersonalizadas.map((f) => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+                  </optgroup>
+                )}
+              </select>
+              <button type="button" onClick={() => setEditorOpen(true)} className="btn-ghost text-xs mt-1 py-1 px-2">
+                + Crear formación
+              </button>
+            </div>
+            <div>
+              <div className="label">Estilo de juego</div>
+              <select className="input mt-1 w-full" value={team.style}
+                onChange={(e) => { team.style = e.target.value as Style; rerender(); }}>
+                <option>Ofensivo</option>
+                <option>Equilibrado</option>
+                <option>Defensivo</option>
+              </select>
+            </div>
+            <div>
+              <div className="label">Capitán</div>
+              <select className="input mt-1 w-full" value={team.captainId ?? ""}
+                onChange={(e) => { team.captainId = e.target.value; rerender(); }}>
+                {starters.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <div className="label">Pateador de penales</div>
+              <select className="input mt-1 w-full" value={team.penaltyTakerId ?? ""}
+                onChange={(e) => { team.penaltyTakerId = e.target.value; rerender(); }}>
+                {starters.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <div className="label">Pateador de córners / tiros libres</div>
+              <select className="input mt-1 w-full" value={team.setPieceTakerId ?? ""}
+                onChange={(e) => { team.setPieceTakerId = e.target.value; rerender(); }}>
+                {starters.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Táctica avanzada */}
+        <div className="card p-4 mt-4">
+          <div className="label mb-1">Táctica avanzada</div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <div className="label">Altura de línea</div>
+              <select className="input mt-1 w-full" value={team.lineHeight}
+                onChange={(e) => { team.lineHeight = e.target.value as LineHeight; rerender(); }}>
+                {(Object.keys(LINE_HEIGHT_TABLE) as LineHeight[]).map((k) => <option key={k}>{k}</option>)}
+              </select>
+              <div className="mt-1 text-[11px] text-muted-foreground">{LINE_HEIGHT_TABLE[team.lineHeight].blurb}</div>
+            </div>
+            <div>
+              <div className="label">Salida (build-up)</div>
+              <select className="input mt-1 w-full" value={team.buildUp}
+                onChange={(e) => { team.buildUp = e.target.value as BuildUp; rerender(); }}>
+                {(Object.keys(BUILDUP_TABLE) as BuildUp[]).map((k) => <option key={k}>{k}</option>)}
+              </select>
+              <div className="mt-1 text-[11px] text-muted-foreground">{BUILDUP_TABLE[team.buildUp].blurb}</div>
+            </div>
+            <div>
+              <div className="label">Intensidad de presión</div>
+              <select className="input mt-1 w-full" value={team.pressIntensity}
+                onChange={(e) => { team.pressIntensity = e.target.value as PressIntensity; rerender(); }}>
+                {(Object.keys(PRESS_TABLE) as PressIntensity[]).map((k) => <option key={k}>{k}</option>)}
+              </select>
+              <div className="mt-1 text-[11px] text-muted-foreground">{PRESS_TABLE[team.pressIntensity].blurb}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Cancha visual con slots */}
+        <div className="mt-5 rounded-2xl bg-pitch relative overflow-hidden border border-pitch/50"
+          style={{ minHeight: rows.length >= 5 ? 480 : 420 }}>
+          <PitchLines />
+          <div className="relative z-10 grid p-3 gap-1" style={{ gridTemplateRows: `repeat(${rows.length}, 1fr)`, height: rows.length >= 5 ? 480 : 420 }}>
+            {[...rows.keys()].reverse().map((rowIdx) => {
+              const row = rows[rowIdx];
+              const offset = rows.slice(0, rowIdx).reduce((s, r) => s + r.length, 0);
+              const indexes = row.map((_, i) => offset + i);
+              return (
+                <SlotRow key={rowIdx} team={team} row={row} indexes={indexes} onSwap={swapSlot} seeOwnRatings={seeOwnRatings} />
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Resumen fuera de posición */}
+        {(() => {
+          const starters = team.starting.map((pid, i) => ({
+            p: team.squad.find((pp) => pp.id === pid),
+            slotPosition: slots[i],
+          })).filter((s) => s.p);
+          // Fuera de posición = el grupo natural del jugador no coincide con el slot
+          const oopList = starters.filter((s) => POSITION_GROUP[s.p!.position] !== slotGroupForPosition(s.slotPosition));
+          if (oopList.length === 0) return null;
+              const baseAvg = Math.round(avg(starters.map((s) => s.p!.overall)));
+              const effAvg = Math.round(avg(starters.map((s) => computePlayerPositionRating(s.p!, s.slotPosition))));
+              return (
+                <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-red-300">
+                    <span>⚠ {oopList.length} jugador{oopList.length > 1 ? "es" : ""} fuera de posición</span>
+                    {seeOwnRatings && (
+                      <>
+                        <span className="text-muted-foreground">·</span>
+                        <span>Promedio base: <b className="text-foreground">{baseAvg}</b></span>
+                        <span className="text-red-400">→ Efectivo: <b>{effAvg}</b></span>
+                      </>
+                    )}
+                  </div>
+              <div className="mt-1 text-xs text-red-200/70">
+                {oopList.map((s) => `${s.p!.name} (${POSITION_SHORT[s.p!.position]}→${POSITION_SHORT[s.slotPosition]})`).join(" · ")}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Roles individuales */}
+        <IndividualRoles team={team} slots={slots} onChange={rerender} />
+
+        {/* Suplentes */}
+        <div className="mt-6">
+          <h2 className="font-display font-bold text-lg">Suplentes ({bench.length})</h2>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {bench.map((p) => (
+              <div key={p.id} className="card px-3 py-2 flex items-center justify-between gap-2 text-sm">
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{p.name}</div>
+                  <div className="text-xs text-muted-foreground">{POSITION_LABEL[p.position]} · {p.age} años</div>
+                </div>
+                {seeOwnRatings && (
+                  <div className="text-right">
+                    <div className="font-display font-black text-lg">
+                      {computePlayerPositionRating(p, POSITION_GROUP[p.position])}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Plantel rival */}
+        <RivalSquadSection
+          rival={teams[otherIdx] ?? null}
+          seeRivalSquad={settings.seeRivalSquad ?? true}
+          seeRivalRatings={settings.seeRivalRatings ?? true}
+        />
+
+        {error && <div className="mt-4 text-sm text-destructive-foreground bg-destructive rounded-md px-3 py-2">{error}</div>}
+      </div>
+
+      {editorOpen && (
+        <FormationEditorModal
+          guardar={guardarFormacion}
+          onClose={() => setEditorOpen(false)}
+          onSaved={(nombre: string, filasGuardadas: Position[][]) => {
+            // El id real lo asigna Supabase y llega en el próximo refresh del hook;
+            // mientras tanto, usamos temporalmente el nombre como id para poder
+            // seleccionarla ya mismo sin esperar la vuelta del servidor.
+            registerCustomFormation(nombre, filasGuardadas);
+            changeFormation(nombre);
+            setEditorOpen(false);
+          }}
+        />
+      )}
+
+      <div className="fixed bottom-0 inset-x-0 border-t bg-background/95 backdrop-blur px-4 py-3">
+        <div className="max-w-4xl mx-auto flex gap-3">
+          <button className="btn-secondary flex-1" onClick={() => { team.starting = autoLineup(team.squad, team.formation); rerender(); }}>
+            Auto-alineación
+          </button>
+          <button className="btn-primary flex-1" onClick={confirmTeam}>Confirmar equipo →</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoleEffectBadge({ role }: { role: string | undefined }) {
+  const eff = roleEffect(role);
+  if (!role || (eff.attack === 0 && eff.defense === 0)) {
+    return <span className="text-[11px] text-muted-foreground">Sin efecto</span>;
+  }
+  const fmt = (n: number) => (n > 0 ? `+${n}` : `${n}`);
+  return (
+    <span className="text-[11px] flex items-center gap-2">
+      <span className={eff.attack > 0 ? "text-green-500" : eff.attack < 0 ? "text-red-400" : "text-muted-foreground"}>
+        ATA {fmt(eff.attack)}
+      </span>
+      <span className={eff.defense > 0 ? "text-green-500" : eff.defense < 0 ? "text-red-400" : "text-muted-foreground"}>
+        DEF {fmt(eff.defense)}
+      </span>
+    </span>
+  );
+}
+
+function IndividualRoles({ team, slots, onChange }: {
+  team: Team; slots: Position[]; onChange: () => void;
+}) {
+  // Titulares en el orden de la alineación, con su grupo de posición EN CANCHA (slot).
+  const starters = team.starting
+    .map((id, i) => {
+      const p = team.squad.find((pp) => pp.id === id);
+      return p ? { p, fieldGroup: slotGroupForPosition(slots[i]) ?? "GK" } : null;
+    })
+    .filter(Boolean) as Array<{ p: Player; fieldGroup: PositionGroup }>;
+
+  return (
+    <div className="mt-6">
+      <h2 className="font-display font-bold text-lg">Roles individuales</h2>
+      <p className="text-xs text-muted-foreground mt-0.5">
+        Ajustan levemente el aporte de cada jugador al Nivel de Ataque o Defensa del equipo.
+      </p>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        {starters.map(({ p, fieldGroup }) => {
+          const roles = rolesForPosition(fieldGroup);
+          const groups = Array.from(
+            new Set(roles.map((r) => ROLE_TABLE[r].group ?? "")),
+          );
+          // El rol solo cuenta si corresponde al grupo de la posición de cancha actual.
+          const currentRole = roles.includes(p.individualRole || "") ? p.individualRole : "";
+          return (
+            <div key={p.id} className="card px-3 py-2 flex items-center justify-between gap-3 text-sm">
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">
+                  {p.name} <span className="text-xs text-muted-foreground">({POSITION_SHORT[p.position]})</span>
+                </div>
+                {roles.length > 0 ? (
+                  <select
+                    className="input mt-1 w-full text-xs"
+                    value={currentRole || ""}
+                    onChange={(e) => { p.individualRole = e.target.value; onChange(); }}
+                  >
+                    <option value="">Sin rol específico</option>
+                    {groups.map((g) =>
+                      g ? (
+                        <optgroup key={g} label={g}>
+                          {roles.filter((r) => ROLE_TABLE[r].group === g).map((r) => (
+                            <option key={r} value={r}>{r}</option>
+                          ))}
+                        </optgroup>
+                      ) : (
+                        roles.filter((r) => !ROLE_TABLE[r].group).map((r) => (
+                          <option key={r} value={r}>{r}</option>
+                        ))
+                      ),
+                    )}
+                  </select>
+                ) : (
+                  <div className="mt-1 text-xs text-muted-foreground">El arquero no tiene rol específico</div>
+                )}
+              </div>
+              <div className="text-right shrink-0">
+                <RoleEffectBadge role={currentRole || undefined} />
+                {currentRole && ROLE_TABLE[currentRole] && (
+                  <div className="text-[10px] text-muted-foreground mt-0.5 max-w-[8rem]">
+                    {ROLE_TABLE[currentRole].blurb}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SlotRow({ team, row, indexes, onSwap, seeOwnRatings }: {
+  team: Team; row: Position[]; indexes: number[];
+  onSwap: (slotIndex: number, newPlayerId: string) => void;
+  seeOwnRatings: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-around gap-2">
+      {indexes.map((slotIndex, i) => (
+        <SlotChip key={slotIndex} team={team} slotIndex={slotIndex} onSwap={onSwap} slotGroup={row[i]} seeOwnRatings={seeOwnRatings} />
+      ))}
+    </div>
+  );
+}
+
+function SlotChip({ team, slotIndex, slotGroup, onSwap, seeOwnRatings }: {
+  team: Team; slotIndex: number; slotGroup: Position;
+  onSwap: (slotIndex: number, newPlayerId: string) => void;
+  seeOwnRatings: boolean;
+}) {
+  const id = team.starting[slotIndex];
+  const p = team.squad.find((pp) => pp.id === id);
+  const effective = p ? computePlayerPositionRating(p, slotGroup) : 0;
+  const slotGroupName = slotGroupForPosition(slotGroup);
+  const oop = p ? (slotGroupName !== POSITION_GROUP[p.position]) : false;
+  return (
+    <label className="relative flex flex-col items-center text-center max-w-[9rem]">
+      <span className="text-[10px] uppercase tracking-wider text-lime-200/80">{POSITION_SHORT[slotGroup]}</span>
+      <select
+        value={id ?? ""}
+        onChange={(e) => onSwap(slotIndex, e.target.value)}
+        className="mt-1 w-full appearance-none rounded-lg bg-white/95 text-foreground text-xs sm:text-sm font-medium px-2 py-1.5 shadow-md focus:outline-none focus:ring-2 focus:ring-primary"
+      >
+        {team.squad.map((sp) => {
+          const effectiveOption = computePlayerPositionRating(sp, slotGroup);
+          return (
+            <option key={sp.id} value={sp.id}>
+              {seeOwnRatings
+                ? `${sp.name} (${effectiveOption} ${POSITION_SHORT[sp.position]})`
+                : `${sp.name} (${POSITION_SHORT[sp.position]})`}
+            </option>
+          );
+        })}
+      </select>
+      {p && (
+        <div className="mt-1 flex items-center gap-1">
+          {seeOwnRatings ? (
+            <>
+              <span className="text-[10px] text-lime-100/70">
+                PAS {Math.round(p.passing)} TIR {Math.round(p.shooting)} REG {Math.round(p.dribbling)} DEF {Math.round(p.defense)} FIS {Math.round(p.physical)} VEL {Math.round(p.pace)}
+              </span>
+              <span className="text-[10px] font-bold text-lime-100/90">
+                {oop ? `${p.overall} → ${effective}` : effective}
+              </span>
+            </>
+          ) : (
+            oop && (
+              <span className="text-[10px] font-bold text-red-400" title={`Fuera de posición: ${POSITION_LABEL[p.position]} en slot ${POSITION_SHORT[slotGroup]}`}>
+                ⚠ Fuera de pos.
+              </span>
+            )
+          )}
+        </div>
+      )}
+    </label>
+  );
+}
+
+function RivalSquadSection({
+  rival,
+  seeRivalSquad,
+  seeRivalRatings,
+}: {
+  rival: Team | null;
+  seeRivalSquad: boolean;
+  seeRivalRatings: boolean;
+}) {
+  if (!rival) return null;
+
+  return (
+    <div className="mt-8">
+      <h2 className="font-display font-bold text-lg flex items-center gap-2">
+        <span
+          className="inline-block h-3 w-3 rounded-full"
+          style={{ backgroundColor: rival.config.color }}
+          aria-hidden="true"
+        />
+        Plantel rival
+        {!seeRivalSquad && (
+          <span className="ml-1 text-xs font-normal text-muted-foreground">(oculto por configuración)</span>
+        )}
+      </h2>
+
+      {!seeRivalSquad ? (
+        <div className="mt-3 rounded-xl border border-border bg-muted/30 px-5 py-8 text-center text-sm text-muted-foreground">
+          La visibilidad del plantel rival está desactivada en las reglas del partido.
+        </div>
+      ) : (
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {rival.squad.map((p) => {
+            const isStarter = rival.starting.includes(p.id);
+            return (
+              <div
+                key={p.id}
+                className={`card px-3 py-2 flex items-center justify-between gap-2 text-sm ${
+                  isStarter ? "" : "opacity-60"
+                }`}
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{p.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {POSITION_SHORT[p.position]} · {p.age} años
+                    {isStarter ? "" : " · Suplente"}
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  {seeRivalRatings ? (
+                    <div className="font-display font-black text-lg">{p.overall}</div>
+                  ) : (
+                    <div
+                      className="font-display font-black text-lg text-muted-foreground"
+                      aria-label="Valoración oculta"
+                    >
+                      ?
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PitchLines() {
+  return (
+    <div className="absolute inset-0 pointer-events-none">
+      <div className="absolute inset-0 opacity-20 [background:repeating-linear-gradient(90deg,transparent_0_10%,rgba(255,255,255,0.06)_10%_20%)]" />
+      <div className="absolute inset-3 border border-white/30 rounded-lg" />
+      <div className="absolute left-1/2 top-3 bottom-3 border-l border-white/30" />
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 rounded-full border border-white/30" />
+    </div>
+  );
 }
 </file>
 
@@ -19810,581 +20442,6 @@ function LocalScreenSwitch({ screen }: { screen: string }) {
     case "tournament_match_live": return <TournamentMatchScreen />;
     default: return <HomeScreen />;
   }
-}
-</file>
-
-<file path="src/components/football/LockerScreen.tsx">
-import { useEffect, useMemo, useState } from "react";
-import { useGame } from "@/lib/football/store";
-import { FORMATION_LIST, slotsFor, rowsFor, registerCustomFormation, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
-import { useFormacionesPersonalizadas } from "@/hooks/use-formaciones-personalizadas";
-import { FormationEditorModal } from "@/components/football/FormationEditorModal";
-import { autoLineup } from "@/lib/football/bot";
-import { computePlayerPositionRating } from "@/lib/football/engine";
-import {
-  ROLE_TABLE,
-  rolesForPosition,
-  roleEffect,
-  LINE_HEIGHT_TABLE,
-  BUILDUP_TABLE,
-  PRESS_TABLE,
-} from "@/lib/football/tactics";
-import type {
-  BuildUp,
-  FormationName,
-  LineHeight,
-  Player,
-  Position,
-  PositionGroup,
-  PressIntensity,
-  Style,
-  Team,
-} from "@/lib/football/types";
-import { POSITION_GROUP } from "@/lib/football/types";
-
-const POSITION_LABEL: Record<Position, string> = {
-  POR: "Arquero",
-  DFC: "Def. Central", LI: "Lateral Izq.", LD: "Lateral Der.", CAI: "Carrilero Izq.", CAD: "Carrilero Der.",
-  MCD: "Med. Defensivo", MC: "Med. Central", MI: "Med. Izquierdo", MD: "Med. Derecho", MCO: "Med. Ofensivo",
-  DC: "Del. Centro", SD: "Segundo Del.", EI: "Extremo Izq.", ED: "Extremo Der.",
-};
-const POSITION_SHORT: Record<Position, string> = {
-  POR: "POR",
-  DFC: "DFC", LI: "LI", LD: "LD", CAI: "CAI", CAD: "CAD",
-  MCD: "MCD", MC: "MC", MI: "MI", MD: "MD", MCO: "MCO",
-  DC: "DC", SD: "SD", EI: "EI", ED: "ED",
-};
-const GROUP_SHORT: Record<PositionGroup, string> = { GK: "ARQ", DEF: "DEF", MID: "MED", FWD: "DEL" };
-const avg = (a: number[]) => (a.length ? a.reduce((s, n) => s + n, 0) / a.length : 0);
-
-export function LockerScreen() {
-  const { setScreen, teams, activeLockerTeam, setActiveLockerTeam, settings, setTeams } = useGame();
-  const maybeTeam = teams[activeLockerTeam];
-  if (!maybeTeam) return null;
-  const team: Team = maybeTeam;
-  const otherIdx = activeLockerTeam === 0 ? 1 : 0;
-  const seeOwnRatings = settings.seeOwnRatings ?? true;
-
-  const [, forceTick] = useState(0);
-  const rerender = () => forceTick((n) => n + 1);
-  const [error, setError] = useState<string | null>(null);
-  const [editorOpen, setEditorOpen] = useState(false);
-  const { formaciones: formacionesPersonalizadas, guardar: guardarFormacion } = useFormacionesPersonalizadas();
-
-  // Registrar las formaciones personalizadas del usuario para que slotsFor/rowsFor las reconozcan por id.
-  useEffect(() => {
-    for (const f of formacionesPersonalizadas) registerCustomFormation(f.id, f.filas);
-  }, [formacionesPersonalizadas]);
-  const slots = useMemo(() => slotsFor(team.formation), [team.formation]);
-  const rows = useMemo(() => rowsFor(team.formation), [team.formation]);
-
-  function changeFormation(f: FormationName) {
-    team.formation = f;
-    team.starting = autoLineup(team.squad, f);
-    // Actualizar pateadores/capitán si dejaron de ser titulares
-    const starters = team.squad.filter((p) => team.starting.includes(p.id));
-    if (!team.captainId || !starters.some((p) => p.id === team.captainId)) team.captainId = starters[0]?.id;
-    if (!team.penaltyTakerId || !starters.some((p) => p.id === team.penaltyTakerId))
-      team.penaltyTakerId = [...starters].sort((a, b) => b.shooting - a.shooting)[0]?.id;
-    if (!team.setPieceTakerId || !starters.some((p) => p.id === team.setPieceTakerId))
-      team.setPieceTakerId = team.penaltyTakerId;
-    setError(null);
-    rerender();
-  }
-
-  function swapSlot(slotIndex: number, newPlayerId: string) {
-    const current = team.starting[slotIndex];
-    if (current === newPlayerId) return;
-    const otherSlot = team.starting.indexOf(newPlayerId);
-    if (otherSlot >= 0) {
-      // ya titular: intercambiar
-      team.starting[otherSlot] = current;
-    }
-    team.starting[slotIndex] = newPlayerId;
-    setError(null);
-    rerender();
-  }
-
-  function confirmTeam() {
-    // Validación: los 11 no vacíos y GK presente
-    if (team.starting.length !== 11 || team.starting.some((id) => !id)) {
-      setError("Faltan jugadores en la alineación.");
-      return;
-    }
-    const groupMap: Record<PositionGroup, number> = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
-    team.starting.forEach((id, i) => {
-      const p = team.squad.find((pp) => pp.id === id);
-      const slotGroup = slotGroupForPosition(slots[i]) ?? "GK";
-      if (p) groupMap[slotGroup] += 1;
-    });
-    if (groupMap.GK < 1) {
-      setError("Falta el arquero en la alineación.");
-      return;
-    }
-    team.substitutionsLeft = settings.maxSubs;
-    // Guardar teams
-    setTeams([teams[0], teams[1]]);
-    // Siguiente pantalla: si hay otro humano por armar, handoff; si no, confirm
-    const other = teams[otherIdx];
-    if (other && !other.config.isBot && !(other as any)._armed) {
-      // marcar armado
-      (team as any)._armed = true;
-      setActiveLockerTeam(otherIdx as 0 | 1);
-      setScreen("handoff");
-      return;
-    }
-    (team as any)._armed = true;
-    // Si el otro es bot y no está armado, ir por handoff (auto arma bot); si ya está armado, confirm
-    if (other && other.config.isBot && !(other as any)._armed) {
-      setActiveLockerTeam(otherIdx as 0 | 1);
-      setScreen("handoff");
-    } else {
-      setScreen("confirm");
-    }
-  }
-
-  const starters = team.squad.filter((p) => team.starting.includes(p.id));
-  const bench = team.squad.filter((p) => !team.starting.includes(p.id));
-
-  return (
-    <div className="min-h-screen bg-background text-foreground pb-24">
-      <div className="max-w-4xl mx-auto px-4 py-6">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-3 min-w-0">
-            <span className="h-5 w-5 rounded-full shrink-0" style={{ backgroundColor: team.config.color }} />
-            <h1 className="font-display text-2xl sm:text-3xl font-black truncate">{team.config.name} · Vestuario</h1>
-          </div>
-          {seeOwnRatings && (
-            <div className="text-xs text-muted-foreground">Promedio: {Math.round(starters.reduce((s, p, i) => s + computePlayerPositionRating(p, slots[i]), 0) / (starters.length || 1))}</div>
-          )}
-        </div>
-
-        {/* Táctica */}
-        <div className="card p-4 mt-5">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div>
-              <div className="label">Formación</div>
-              <select className="input mt-1 w-full" value={team.formation}
-                onChange={(e) => changeFormation(e.target.value as FormationName)}>
-                <optgroup label="Predefinidas">
-                  {FORMATION_LIST.map((f) => <option key={f} value={f}>{f}</option>)}
-                </optgroup>
-                {formacionesPersonalizadas.length > 0 && (
-                  <optgroup label="Mis formaciones">
-                    {formacionesPersonalizadas.map((f) => <option key={f.id} value={f.id}>{f.nombre}</option>)}
-                  </optgroup>
-                )}
-              </select>
-              <button type="button" onClick={() => setEditorOpen(true)} className="btn-ghost text-xs mt-1 py-1 px-2">
-                + Crear formación
-              </button>
-            </div>
-            <div>
-              <div className="label">Estilo de juego</div>
-              <select className="input mt-1 w-full" value={team.style}
-                onChange={(e) => { team.style = e.target.value as Style; rerender(); }}>
-                <option>Ofensivo</option>
-                <option>Equilibrado</option>
-                <option>Defensivo</option>
-              </select>
-            </div>
-            <div>
-              <div className="label">Capitán</div>
-              <select className="input mt-1 w-full" value={team.captainId ?? ""}
-                onChange={(e) => { team.captainId = e.target.value; rerender(); }}>
-                {starters.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <div className="label">Pateador de penales</div>
-              <select className="input mt-1 w-full" value={team.penaltyTakerId ?? ""}
-                onChange={(e) => { team.penaltyTakerId = e.target.value; rerender(); }}>
-                {starters.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <div className="label">Pateador de córners / tiros libres</div>
-              <select className="input mt-1 w-full" value={team.setPieceTakerId ?? ""}
-                onChange={(e) => { team.setPieceTakerId = e.target.value; rerender(); }}>
-                {starters.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* Táctica avanzada */}
-        <div className="card p-4 mt-4">
-          <div className="label mb-1">Táctica avanzada</div>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div>
-              <div className="label">Altura de línea</div>
-              <select className="input mt-1 w-full" value={team.lineHeight}
-                onChange={(e) => { team.lineHeight = e.target.value as LineHeight; rerender(); }}>
-                {(Object.keys(LINE_HEIGHT_TABLE) as LineHeight[]).map((k) => <option key={k}>{k}</option>)}
-              </select>
-              <div className="mt-1 text-[11px] text-muted-foreground">{LINE_HEIGHT_TABLE[team.lineHeight].blurb}</div>
-            </div>
-            <div>
-              <div className="label">Salida (build-up)</div>
-              <select className="input mt-1 w-full" value={team.buildUp}
-                onChange={(e) => { team.buildUp = e.target.value as BuildUp; rerender(); }}>
-                {(Object.keys(BUILDUP_TABLE) as BuildUp[]).map((k) => <option key={k}>{k}</option>)}
-              </select>
-              <div className="mt-1 text-[11px] text-muted-foreground">{BUILDUP_TABLE[team.buildUp].blurb}</div>
-            </div>
-            <div>
-              <div className="label">Intensidad de presión</div>
-              <select className="input mt-1 w-full" value={team.pressIntensity}
-                onChange={(e) => { team.pressIntensity = e.target.value as PressIntensity; rerender(); }}>
-                {(Object.keys(PRESS_TABLE) as PressIntensity[]).map((k) => <option key={k}>{k}</option>)}
-              </select>
-              <div className="mt-1 text-[11px] text-muted-foreground">{PRESS_TABLE[team.pressIntensity].blurb}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Cancha visual con slots */}
-        <div className="mt-5 rounded-2xl bg-pitch relative overflow-hidden border border-pitch/50"
-          style={{ minHeight: rows.length >= 5 ? 480 : 420 }}>
-          <PitchLines />
-          <div className="relative z-10 grid p-3 gap-1" style={{ gridTemplateRows: `repeat(${rows.length}, 1fr)`, height: rows.length >= 5 ? 480 : 420 }}>
-            {[...rows.keys()].reverse().map((rowIdx) => {
-              const row = rows[rowIdx];
-              const offset = rows.slice(0, rowIdx).reduce((s, r) => s + r.length, 0);
-              const indexes = row.map((_, i) => offset + i);
-              return (
-                <SlotRow key={rowIdx} team={team} row={row} indexes={indexes} onSwap={swapSlot} seeOwnRatings={seeOwnRatings} />
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Resumen fuera de posición */}
-        {(() => {
-          const starters = team.starting.map((pid, i) => ({
-            p: team.squad.find((pp) => pp.id === pid),
-            slotPosition: slots[i],
-          })).filter((s) => s.p);
-          // Fuera de posición = el grupo natural del jugador no coincide con el slot
-          const oopList = starters.filter((s) => POSITION_GROUP[s.p!.position] !== slotGroupForPosition(s.slotPosition));
-          if (oopList.length === 0) return null;
-              const baseAvg = Math.round(avg(starters.map((s) => s.p!.overall)));
-              const effAvg = Math.round(avg(starters.map((s) => computePlayerPositionRating(s.p!, s.slotPosition))));
-              return (
-                <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-red-300">
-                    <span>⚠ {oopList.length} jugador{oopList.length > 1 ? "es" : ""} fuera de posición</span>
-                    {seeOwnRatings && (
-                      <>
-                        <span className="text-muted-foreground">·</span>
-                        <span>Promedio base: <b className="text-foreground">{baseAvg}</b></span>
-                        <span className="text-red-400">→ Efectivo: <b>{effAvg}</b></span>
-                      </>
-                    )}
-                  </div>
-              <div className="mt-1 text-xs text-red-200/70">
-                {oopList.map((s) => `${s.p!.name} (${POSITION_SHORT[s.p!.position]}→${POSITION_SHORT[s.slotPosition]})`).join(" · ")}
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* Roles individuales */}
-        <IndividualRoles team={team} slots={slots} onChange={rerender} />
-
-        {/* Suplentes */}
-        <div className="mt-6">
-          <h2 className="font-display font-bold text-lg">Suplentes ({bench.length})</h2>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            {bench.map((p) => (
-              <div key={p.id} className="card px-3 py-2 flex items-center justify-between gap-2 text-sm">
-                <div className="min-w-0">
-                  <div className="truncate font-medium">{p.name}</div>
-                  <div className="text-xs text-muted-foreground">{POSITION_LABEL[p.position]} · {p.age} años</div>
-                </div>
-                {seeOwnRatings && (
-                  <div className="text-right">
-                    <div className="font-display font-black text-lg">
-                      {computePlayerPositionRating(p, POSITION_GROUP[p.position])}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Plantel rival */}
-        <RivalSquadSection
-          rival={teams[otherIdx] ?? null}
-          seeRivalSquad={settings.seeRivalSquad ?? true}
-          seeRivalRatings={settings.seeRivalRatings ?? true}
-        />
-
-        {error && <div className="mt-4 text-sm text-destructive-foreground bg-destructive rounded-md px-3 py-2">{error}</div>}
-      </div>
-
-      {editorOpen && (
-        <FormationEditorModal
-          guardar={guardarFormacion}
-          onClose={() => setEditorOpen(false)}
-          onSaved={(nombre: string, filasGuardadas: Position[][]) => {
-            // El id real lo asigna Supabase y llega en el próximo refresh del hook;
-            // mientras tanto, usamos temporalmente el nombre como id para poder
-            // seleccionarla ya mismo sin esperar la vuelta del servidor.
-            registerCustomFormation(nombre, filasGuardadas);
-            changeFormation(nombre);
-            setEditorOpen(false);
-          }}
-        />
-      )}
-
-      <div className="fixed bottom-0 inset-x-0 border-t bg-background/95 backdrop-blur px-4 py-3">
-        <div className="max-w-4xl mx-auto flex gap-3">
-          <button className="btn-secondary flex-1" onClick={() => { team.starting = autoLineup(team.squad, team.formation); rerender(); }}>
-            Auto-alineación
-          </button>
-          <button className="btn-primary flex-1" onClick={confirmTeam}>Confirmar equipo →</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RoleEffectBadge({ role }: { role: string | undefined }) {
-  const eff = roleEffect(role);
-  if (!role || (eff.attack === 0 && eff.defense === 0)) {
-    return <span className="text-[11px] text-muted-foreground">Sin efecto</span>;
-  }
-  const fmt = (n: number) => (n > 0 ? `+${n}` : `${n}`);
-  return (
-    <span className="text-[11px] flex items-center gap-2">
-      <span className={eff.attack > 0 ? "text-green-500" : eff.attack < 0 ? "text-red-400" : "text-muted-foreground"}>
-        ATA {fmt(eff.attack)}
-      </span>
-      <span className={eff.defense > 0 ? "text-green-500" : eff.defense < 0 ? "text-red-400" : "text-muted-foreground"}>
-        DEF {fmt(eff.defense)}
-      </span>
-    </span>
-  );
-}
-
-function IndividualRoles({ team, slots, onChange }: {
-  team: Team; slots: Position[]; onChange: () => void;
-}) {
-  // Titulares en el orden de la alineación, con su grupo de posición EN CANCHA (slot).
-  const starters = team.starting
-    .map((id, i) => {
-      const p = team.squad.find((pp) => pp.id === id);
-      return p ? { p, fieldGroup: slotGroupForPosition(slots[i]) ?? "GK" } : null;
-    })
-    .filter(Boolean) as Array<{ p: Player; fieldGroup: PositionGroup }>;
-
-  return (
-    <div className="mt-6">
-      <h2 className="font-display font-bold text-lg">Roles individuales</h2>
-      <p className="text-xs text-muted-foreground mt-0.5">
-        Ajustan levemente el aporte de cada jugador al Nivel de Ataque o Defensa del equipo.
-      </p>
-      <div className="mt-2 grid gap-2 sm:grid-cols-2">
-        {starters.map(({ p, fieldGroup }) => {
-          const roles = rolesForPosition(fieldGroup);
-          const groups = Array.from(
-            new Set(roles.map((r) => ROLE_TABLE[r].group ?? "")),
-          );
-          // El rol solo cuenta si corresponde al grupo de la posición de cancha actual.
-          const currentRole = roles.includes(p.individualRole || "") ? p.individualRole : "";
-          return (
-            <div key={p.id} className="card px-3 py-2 flex items-center justify-between gap-3 text-sm">
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">
-                  {p.name} <span className="text-xs text-muted-foreground">({POSITION_SHORT[p.position]})</span>
-                </div>
-                {roles.length > 0 ? (
-                  <select
-                    className="input mt-1 w-full text-xs"
-                    value={currentRole || ""}
-                    onChange={(e) => { p.individualRole = e.target.value; onChange(); }}
-                  >
-                    <option value="">Sin rol específico</option>
-                    {groups.map((g) =>
-                      g ? (
-                        <optgroup key={g} label={g}>
-                          {roles.filter((r) => ROLE_TABLE[r].group === g).map((r) => (
-                            <option key={r} value={r}>{r}</option>
-                          ))}
-                        </optgroup>
-                      ) : (
-                        roles.filter((r) => !ROLE_TABLE[r].group).map((r) => (
-                          <option key={r} value={r}>{r}</option>
-                        ))
-                      ),
-                    )}
-                  </select>
-                ) : (
-                  <div className="mt-1 text-xs text-muted-foreground">El arquero no tiene rol específico</div>
-                )}
-              </div>
-              <div className="text-right shrink-0">
-                <RoleEffectBadge role={currentRole || undefined} />
-                {currentRole && ROLE_TABLE[currentRole] && (
-                  <div className="text-[10px] text-muted-foreground mt-0.5 max-w-[8rem]">
-                    {ROLE_TABLE[currentRole].blurb}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function SlotRow({ team, row, indexes, onSwap, seeOwnRatings }: {
-  team: Team; row: Position[]; indexes: number[];
-  onSwap: (slotIndex: number, newPlayerId: string) => void;
-  seeOwnRatings: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-around gap-2">
-      {indexes.map((slotIndex, i) => (
-        <SlotChip key={slotIndex} team={team} slotIndex={slotIndex} onSwap={onSwap} slotGroup={row[i]} seeOwnRatings={seeOwnRatings} />
-      ))}
-    </div>
-  );
-}
-
-function SlotChip({ team, slotIndex, slotGroup, onSwap, seeOwnRatings }: {
-  team: Team; slotIndex: number; slotGroup: Position;
-  onSwap: (slotIndex: number, newPlayerId: string) => void;
-  seeOwnRatings: boolean;
-}) {
-  const id = team.starting[slotIndex];
-  const p = team.squad.find((pp) => pp.id === id);
-  const effective = p ? computePlayerPositionRating(p, slotGroup) : 0;
-  const slotGroupName = slotGroupForPosition(slotGroup);
-  const oop = p ? (slotGroupName !== POSITION_GROUP[p.position]) : false;
-  return (
-    <label className="relative flex flex-col items-center text-center max-w-[9rem]">
-      <span className="text-[10px] uppercase tracking-wider text-lime-200/80">{POSITION_SHORT[slotGroup]}</span>
-      <select
-        value={id ?? ""}
-        onChange={(e) => onSwap(slotIndex, e.target.value)}
-        className="mt-1 w-full appearance-none rounded-lg bg-white/95 text-foreground text-xs sm:text-sm font-medium px-2 py-1.5 shadow-md focus:outline-none focus:ring-2 focus:ring-primary"
-      >
-        {team.squad.map((sp) => {
-          const effectiveOption = computePlayerPositionRating(sp, slotGroup);
-          return (
-            <option key={sp.id} value={sp.id}>
-              {seeOwnRatings
-                ? `${sp.name} (${effectiveOption} ${POSITION_SHORT[sp.position]})`
-                : `${sp.name} (${POSITION_SHORT[sp.position]})`}
-            </option>
-          );
-        })}
-      </select>
-      {p && (
-        <div className="mt-1 flex items-center gap-1">
-          {seeOwnRatings ? (
-            <>
-              <span className="text-[10px] text-lime-100/70">
-                PAS {Math.round(p.passing)} TIR {Math.round(p.shooting)} REG {Math.round(p.dribbling)} DEF {Math.round(p.defense)} FIS {Math.round(p.physical)} VEL {Math.round(p.pace)}
-              </span>
-              <span className="text-[10px] font-bold text-lime-100/90">
-                {oop ? `${p.overall} → ${effective}` : effective}
-              </span>
-            </>
-          ) : (
-            oop && (
-              <span className="text-[10px] font-bold text-red-400" title={`Fuera de posición: ${POSITION_LABEL[p.position]} en slot ${POSITION_SHORT[slotGroup]}`}>
-                ⚠ Fuera de pos.
-              </span>
-            )
-          )}
-        </div>
-      )}
-    </label>
-  );
-}
-
-function RivalSquadSection({
-  rival,
-  seeRivalSquad,
-  seeRivalRatings,
-}: {
-  rival: Team | null;
-  seeRivalSquad: boolean;
-  seeRivalRatings: boolean;
-}) {
-  if (!rival) return null;
-
-  return (
-    <div className="mt-8">
-      <h2 className="font-display font-bold text-lg flex items-center gap-2">
-        <span
-          className="inline-block h-3 w-3 rounded-full"
-          style={{ backgroundColor: rival.config.color }}
-          aria-hidden="true"
-        />
-        Plantel rival
-        {!seeRivalSquad && (
-          <span className="ml-1 text-xs font-normal text-muted-foreground">(oculto por configuración)</span>
-        )}
-      </h2>
-
-      {!seeRivalSquad ? (
-        <div className="mt-3 rounded-xl border border-border bg-muted/30 px-5 py-8 text-center text-sm text-muted-foreground">
-          La visibilidad del plantel rival está desactivada en las reglas del partido.
-        </div>
-      ) : (
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {rival.squad.map((p) => {
-            const isStarter = rival.starting.includes(p.id);
-            return (
-              <div
-                key={p.id}
-                className={`card px-3 py-2 flex items-center justify-between gap-2 text-sm ${
-                  isStarter ? "" : "opacity-60"
-                }`}
-              >
-                <div className="min-w-0">
-                  <div className="truncate font-medium">{p.name}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {POSITION_SHORT[p.position]} · {p.age} años
-                    {isStarter ? "" : " · Suplente"}
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  {seeRivalRatings ? (
-                    <div className="font-display font-black text-lg">{p.overall}</div>
-                  ) : (
-                    <div
-                      className="font-display font-black text-lg text-muted-foreground"
-                      aria-label="Valoración oculta"
-                    >
-                      ?
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PitchLines() {
-  return (
-    <div className="absolute inset-0 pointer-events-none">
-      <div className="absolute inset-0 opacity-20 [background:repeating-linear-gradient(90deg,transparent_0_10%,rgba(255,255,255,0.06)_10%_20%)]" />
-      <div className="absolute inset-3 border border-white/30 rounded-lg" />
-      <div className="absolute left-1/2 top-3 bottom-3 border-l border-white/30" />
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 rounded-full border border-white/30" />
-    </div>
-  );
 }
 </file>
 

@@ -23,6 +23,7 @@ export function TournamentHubScreen() {
   const [horarioElegido, setHorarioElegido] = useState("");
   const [guardandoHorario, setGuardandoHorario] = useState(false);
   const [soyAdminTorneo, setSoyAdminTorneo] = useState(false);
+  const [editandoHorario, setEditandoHorario] = useState(false);
 
 
   useEffect(() => {
@@ -139,6 +140,7 @@ export function TournamentHubScreen() {
       const f = await fetchFixture(tournamentId);
       setFixture(f);
       setHorarioElegido("");
+      setEditandoHorario(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo guardar el horario.");
     } finally {
@@ -241,13 +243,49 @@ export function TournamentHubScreen() {
                 )}
                 {tournament.isOnline && (
                   <>
-                    {proximo.scheduledAt && (
-                      <button
-                        className="btn-primary"
-                        onClick={() => { setTournamentLiveMatchId(proximo.id); setScreen("tournament_match_live"); }}
-                      >
-                        Ver partido →
-                      </button>
+                    {proximo.scheduledAt && !editandoHorario && (
+                      <div className="flex flex-col items-end gap-1">
+                        <button
+                          className="btn-primary"
+                          onClick={() => { setTournamentLiveMatchId(proximo.id); setScreen("tournament_match_live"); }}
+                        >
+                          Ver partido →
+                        </button>
+                        {soyAdminTorneo && (
+                          <button
+                            className="text-xs text-muted-foreground underline"
+                            onClick={() => setEditandoHorario(true)}
+                          >
+                            Editar horario
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {proximo.scheduledAt && editandoHorario && soyAdminTorneo && (
+                      <div className="flex flex-col items-end gap-1 w-full sm:w-auto">
+                        <input
+                          type="datetime-local"
+                          className="input text-xs w-full"
+                          value={horarioElegido}
+                          onChange={(e) => setHorarioElegido(e.target.value)}
+                          min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+                        />
+                        <div className="flex gap-2 w-full">
+                          <button
+                            className="btn-secondary text-xs flex-1"
+                            onClick={() => { setEditandoHorario(false); setHorarioElegido(""); }}
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            className="btn-primary text-xs disabled:opacity-50 flex-1"
+                            disabled={!horarioElegido || guardandoHorario}
+                            onClick={() => guardarHorario(proximo)}
+                          >
+                            {guardandoHorario ? "Guardando..." : "Guardar"}
+                          </button>
+                        </div>
+                      </div>
                     )}
                     {!proximo.scheduledAt && soyAdminTorneo && tournament.modoHorario === "manual" && (
                       <div className="flex flex-col items-end gap-1 w-full sm:w-auto">

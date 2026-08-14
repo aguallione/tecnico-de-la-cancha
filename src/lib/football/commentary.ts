@@ -166,6 +166,6 @@ export function autoStaminaAlert(minute: number, playerName: string, teamName: s
 
 // ─── Eventos de sugerencias de IA (solo informativos) ────────────────────────
 
-export function aiInsight(minute: number, text: string): MatchEvent {
-  return { minute, kind: "insight" as MatchEvent["kind"], text: `[DT IA] ${text}` };
+export function aiInsight(minute: number, text: string, team: 0 | 1): MatchEvent {
+  return { minute, kind: "insight" as MatchEvent["kind"], team, text: `[DT IA] ${text}` };
 }

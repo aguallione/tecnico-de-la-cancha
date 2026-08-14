@@ -151,4 +151,6 @@ export interface MatchSettings {
   seeRivalRatings: boolean;
   /** Mostrar valoraciones numéricas de los propios jugadores en el vestuario. Default: true. */
   seeOwnRatings: boolean;
+  /** Indica si el partido lo está siguiendo un humano en vivo. Falso en torneos automáticos. */
+  interactive?: boolean;
 }

@@ -523,13 +523,10 @@ export function tickMinute(state: MatchState): MatchEvent[] {
   }
 
   // ─── Sugerencias de IA cada 15–20 minutos simulados ─────────────────────────
-  // Se generan sugerencias para AMBOS equipos (humanos y bots por igual),
-  // cada una identificada con el equipo al que corresponde, para que en modo
-  // 2 jugadores ambos reciban información relevante en el relato compartido.
+  const isInteractive = state.settings.interactive ?? true;
   const insightInterval = 15 + Math.floor(rand() * 6); // 15–20 minutos
-  if (state.minute - state.lastInsightMinute >= insightInterval && state.minute > 5 && !state.finished) {
+  if (isInteractive && state.minute - state.lastInsightMinute >= insightInterval && state.minute > 5 && !state.finished) {
     state.lastInsightMinute = state.minute;
-    const [TA, TB] = state.teams;
     const [posA, posB] = possessionPct(state);
 
     // Genera insights para un equipo concreto frente a su rival.
@@ -537,16 +534,13 @@ export function tickMinute(state: MatchState): MatchEvent[] {
       const results: string[] = [];
       const prefix = team.config.name;
 
-      // Posesión muy baja → sugerir salida más lenta
       if (possession <= 35) {
         results.push(`${prefix}: posesión muy baja (${possession}%). Considerá una salida más lenta para mantener la pelota.`);
       }
-      // Posesión dominante
       if (possession >= 65) {
         results.push(`${prefix}: domina la posesión (${possession}%). Bien parado en el mediocampo.`);
       }
 
-      // Jugador con stamina crítica
       const veryTired = team.squad
         .filter((p) => p.onField && !p.redCarded && p.stamina < 50)
         .sort((x, y) => x.stamina - y.stamina)[0];
@@ -554,12 +548,10 @@ export function tickMinute(state: MatchState): MatchEvent[] {
         results.push(`${prefix}: ${veryTired.name} tiene el físico muy bajo (${Math.round(veryTired.stamina)}%). Considerá un cambio.`);
       }
 
-      // Eficacia del rival contra este equipo
       if (rival.shots > 0 && rival.shotsOnTarget / rival.shots > 0.55) {
         results.push(`${prefix}: el rival es muy eficaz (${rival.shotsOnTarget} tiros al arco de ${rival.shots}). Reforzá la defensa.`);
       }
 
-      // Diferencia de xG marcada
       if (team.xg > 0 && rival.xg > 0) {
         if (rival.xg > team.xg * 1.6) {
           results.push(`${prefix}: el rival genera más peligro real (xG ${rival.xg.toFixed(1)} vs ${team.xg.toFixed(1)}). Está siendo más efectivo.`);
@@ -571,16 +563,17 @@ export function tickMinute(state: MatchState): MatchEvent[] {
       return results;
     }
 
-    // Generar un insight para cada equipo (independientemente de si es bot o humano)
-    const insightsA = insightsFor(TA, TB, posA);
-    const insightsB = insightsFor(TB, TA, posB);
-
-    if (insightsA.length > 0) {
-      newEvents.push(C.aiInsight(state.minute, insightsA[Math.floor(Math.random() * insightsA.length)]));
-    }
-    if (insightsB.length > 0) {
-      newEvents.push(C.aiInsight(state.minute, insightsB[Math.floor(Math.random() * insightsB.length)]));
-    }
+    // Recorrer ambos equipos. Generar insight solo si NO es bot.
+    state.teams.forEach((team, idx) => {
+      if (team.config.isBot) return; // Los bots no reciben consejos
+      const rivalIdx = idx === 0 ? 1 : 0;
+      const rivalTeam = state.teams[rivalIdx];
+      const possession = idx === 0 ? posA : posB;
+      const insights = insightsFor(team, rivalTeam, possession);
+      if (insights.length > 0) {
+        newEvents.push(C.aiInsight(state.minute, insights[Math.floor(Math.random() * insights.length)], idx as 0 | 1));
+      }
+    });
   }
 
   // Final
