@@ -4,8 +4,8 @@
  *
  * El motor corre SOLO en el servidor (tickPartida). Este componente:
  *  · Lee partida.match_state por polling (store) y lo deserializa para mostrar.
- *  · Si soy el controller, dispara bloques de simulación al servidor según la
- *    velocidad elegida (manual / normal / rápido).
+ *  · Si soy el controller, dispara minutos de simulación al servidor según la
+ *    velocidad elegida (normal / rápido).
  *  · Cualquier jugador puede proponer/confirmar sustituciones (confirmarSub);
  *    el servidor las aplica en el próximo tick respetando el modo de coop.
  *  · Cualquier jugador puede cambiar las tácticas de su equipo: el cambio se
@@ -29,13 +29,20 @@ import type { MatchState } from "@/lib/football/engine";
 import { TransferirAdminModal } from "@/components/online/TransferirAdminModal";
 import { OnlineHeader } from "@/components/online/OnlineHeader";
 
-// Milisegundos entre bloques según velocidad. "manual" no auto-avanza.
-const RITMO_MS: Record<Exclude<Velocidad, "manual">, number> = {
+type VelocidadOnline = Exclude<Velocidad, "manual">;
+
+// Milisegundos entre cada minuto simulado.
+const RITMO_MS: Record<VelocidadOnline, number> = {
   normal: 3500,
   rapido: 1500,
 };
-// Minutos simulados por bloque.
+
+// Minutos simulados en cada ejecución del servidor.
 const BLOQUE_MIN = 1;
+
+function velocidadOnline(valor: Velocidad | undefined): VelocidadOnline {
+  return valor === "rapido" ? "rapido" : "normal";
+}
 
 const POSITION_SHORT: Record<Position, string> = {
   POR: "POR",
@@ -53,7 +60,7 @@ export function OnlineMatchScreen() {
   const [panelOpen, setPanelOpen] = useState<null | 0 | 1>(null);
   const tickLock = useRef(false);
 
-  const velocidad: Velocidad = partida?.velocidad ?? "normal";
+  const velocidad = velocidadOnline(partida?.velocidad);
 
   const state = useMemo(
     () => (partida?.match_state ? deserializeMatchState(partida.match_state) : null),
@@ -77,10 +84,9 @@ export function OnlineMatchScreen() {
     }
   }
 
-  // Auto-avance: solo el controller y solo si la velocidad no es manual.
+  // Auto-avance: solo el controller, a velocidad normal o rápida.
   useEffect(() => {
     if (!soyController) return;
-    if (velocidad === "manual") return;
     if (!partida || state?.finished) return;
     const ms = RITMO_MS[velocidad];
     const id = setInterval(() => {
@@ -103,7 +109,7 @@ export function OnlineMatchScreen() {
   const displayMinute = state.minute > 90 ? `90+${state.minute - 90}` : `${state.minute}`;
   const miEquipoIdx = miJugador?.equipo_idx ?? null;
 
-  async function cambiarVelocidad(v: Velocidad) {
+  async function cambiarVelocidad(v: VelocidadOnline) {
     if (!soyController || !partida) return;
     await guardarAjustesPartida(partida.id, { velocidad: v });
     await refrescar();
@@ -150,18 +156,9 @@ export function OnlineMatchScreen() {
         <div className="max-w-3xl mx-auto px-4 pb-3 flex flex-wrap items-center gap-2 justify-center text-xs">
           {soyController ? (
             <>
-              {velocidad === "manual" ? (
-                <button className="chip" onClick={avanzar} disabled={ticking || state.finished}>
-                  {ticking ? "Simulando…" : `Avanzar ${BLOQUE_MIN}'`}
-                </button>
-              ) : (
-                <span className="chip" data-active>
-                  {ticking ? "Simulando…" : "Auto"}
-                </span>
-              )}
-              <button className="chip" onClick={() => cambiarVelocidad("manual")} data-active={velocidad === "manual"}>
-                Manual
-              </button>
+              <span className="chip" data-active>
+                {ticking ? "Simulando…" : "Auto"}
+              </span>
               <button className="chip" onClick={() => cambiarVelocidad("normal")} data-active={velocidad === "normal"}>
                 Normal
               </button>

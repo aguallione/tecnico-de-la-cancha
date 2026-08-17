@@ -30,17 +30,22 @@ const DEFAULT_SETTINGS: MatchSettings = {
   seeOwnRatings: true,
 };
 
-const VELOCIDAD_LABEL: Record<Velocidad, string> = {
-  manual: "Manual (el controlador avanza bloque a bloque)",
-  normal: "Automático normal (~2s por bloque)",
-  rapido: "Automático rápido (~0.5s por bloque)",
+type VelocidadOnline = Exclude<Velocidad, "manual">;
+
+const VELOCIDAD_LABEL: Record<VelocidadOnline, string> = {
+  normal: "Automático normal (~3,5 s por minuto)",
+  rapido: "Automático rápido (~1,5 s por minuto)",
 };
 
+function velocidadOnline(valor: Velocidad | undefined): VelocidadOnline {
+  return valor === "rapido" ? "rapido" : "normal";
+}
 export function OnlineSetupScreen() {
   const { partida, partidaId, soyAdmin, refrescar } = useOnlineGame();
   const [settings, setSettings] = useState<MatchSettings>(partida?.configuracion ?? DEFAULT_SETTINGS);
-  const [velocidad, setVelocidad] = useState<Velocidad>(partida?.velocidad ?? "manual");
-  const [bloque, setBloque] = useState<number>(partida?.bloque_minutos ?? 5);
+  const [velocidad, setVelocidad] = useState<VelocidadOnline>(
+    velocidadOnline(partida?.velocidad),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,8 +67,10 @@ export function OnlineSetupScreen() {
             <ReadRow label="Ver plantel rival" value={c.seeRivalSquad ? "Sí" : "No"} />
             <ReadRow label="Ver valoraciones rival" value={c.seeRivalRatings ? "Sí" : "No"} />
             <ReadRow label="Ver valoraciones propias" value={c.seeOwnRatings ? "Sí" : "No"} />
-            <ReadRow label="Velocidad" value={VELOCIDAD_LABEL[partida.velocidad]} />
-            <ReadRow label="Bloque" value={`${partida.bloque_minutos} min`} />
+            <ReadRow
+              label="Velocidad"
+              value={VELOCIDAD_LABEL[velocidadOnline(partida.velocidad)]}
+            />
           </div>
           <p className="mt-6 text-sm text-muted-foreground">Esperá a que el Admin continúe al vestuario.</p>
         </div>
@@ -76,7 +83,7 @@ export function OnlineSetupScreen() {
     setError(null);
     try {
       await guardarConfiguracion(partidaId!, settings);
-      await guardarAjustesPartida(partidaId!, { velocidad, bloque_minutos: bloque });
+      await guardarAjustesPartida(partidaId!, { velocidad });
       await actualizarEstado(partidaId!, "vestuario");
       await refrescar();
     } catch (e) {
@@ -157,36 +164,20 @@ export function OnlineSetupScreen() {
 
         <div className="card p-4 mt-4">
           <h3 className="font-display text-lg font-bold">Ritmo de la simulación</h3>
-          <div className="mt-3 space-y-3 text-sm">
-            <div>
-              <div className="label mb-1">Avance</div>
-              <div className="grid gap-2">
-                {(Object.keys(VELOCIDAD_LABEL) as Velocidad[]).map((v) => (
-                  <button
-                    key={v}
-                    onClick={() => setVelocidad(v)}
-                    className={`text-left rounded-lg border px-3 py-2 transition-colors ${
-                      velocidad === v ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
-                    }`}
-                  >
-                    <span className="text-sm">{VELOCIDAD_LABEL[v]}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <div className="label mb-1">Minutos por bloque</div>
-              <div className="flex gap-2">
-                {[5, 10, 15].map((b) => (
-                  <button
-                    key={b}
-                    onClick={() => setBloque(b)}
-                    className={`chip ${bloque === b ? "chip-active" : ""}`}
-                  >
-                    {b} min
-                  </button>
-                ))}
-              </div>
+          <div className="mt-3 text-sm">
+            <div className="label mb-1">Velocidad</div>
+            <div className="grid gap-2">
+              {(Object.keys(VELOCIDAD_LABEL) as VelocidadOnline[]).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setVelocidad(v)}
+                  className={`text-left rounded-lg border px-3 py-2 transition-colors ${
+                    velocidad === v ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
+                  }`}
+                >
+                  <span className="text-sm">{VELOCIDAD_LABEL[v]}</span>
+                </button>
+              ))}
             </div>
           </div>
         </div>
