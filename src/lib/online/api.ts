@@ -187,10 +187,14 @@ export async function fetchJugadores(partidaId: string): Promise<JugadorOnline[]
 // ─── Heartbeat ──────────────────────────────────────────────────────────────
 
 export async function enviarHeartbeat(jugadorId: string): Promise<void> {
-  await supabase
+  const { error } = await supabase
     .from("jugadores_online")
-    .update({ ultimo_heartbeat: new Date().toISOString() })
+    .update({
+      ultimo_heartbeat: new Date().toISOString(),
+      desconectado_en: null,
+    })
     .eq("id", jugadorId);
+  if (error) throw new Error(error.message);
 }
 
 /** Elimina la fila del jugador (al salir de la partida). */

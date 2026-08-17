@@ -185,11 +185,20 @@ export const tickPartida = createServerFn({ method: "POST" })
       }
     }
 
-    // Procesar jugadores cuya gracia ya expiró
+    // Procesar jugadores desconectados. Si el heartbeat volvió, cancelar la
+    // desconexión antes de evaluar si venció la ventana de gracia.
     const jugadoresActualizados = await leerJugadores(data.partida_id);
     for (const j of jugadoresActualizados) {
       if (j.desconectado_en) {
-        const msDesdeDesc = ahora - new Date(j.desconectado_en).getTime();
+        if (conectado(j, Date.now())) {
+          await supabase
+            .from("jugadores_online")
+            .update({ desconectado_en: null })
+            .eq("id", j.id);
+          continue;
+        }
+
+        const msDesdeDesc = Date.now() - new Date(j.desconectado_en).getTime();
         if (msDesdeDesc > RECONNECT_GRACE_MS) {
           // La gracia expiró: aplicar abandono involuntario
           const otrosHumanos = jugadoresActualizados.filter(
