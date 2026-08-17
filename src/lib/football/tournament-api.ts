@@ -417,15 +417,15 @@ export async function fetchTorneoPartido(torneoPartidoId: string): Promise<Tourn
 
 /**
  * Asigna o cambia el horario de un partido de torneo online en modo manual.
- * Protegido por RLS: solo un admin del torneo puede hacerlo, y solo si el
- * partido todavía está pendiente (ver migración
- * 20260808213000_torneo_partidos_update_horario_admin.sql).
+ * La autorización, el estado del partido y las superposiciones se validan
+ * dentro de una función segura de la base de datos.
  */
 export async function asignarHoraPartido(torneoPartidoId: string, fechaHoraISO: string): Promise<void> {
-  const { error } = await supabase
-    .from("torneo_partidos")
-    .update({ hora_programada: fechaHoraISO })
-    .eq("id", torneoPartidoId);
+  const { error } = await supabase.rpc("asignar_hora_partido_torneo", {
+    p_torneo_partido_id: torneoPartidoId,
+    p_fecha_hora: fechaHoraISO,
+  });
+
   if (error) throw new Error(error.message);
 }
 
