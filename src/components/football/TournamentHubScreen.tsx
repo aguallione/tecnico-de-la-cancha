@@ -3,6 +3,7 @@ import { useGame } from "@/lib/football/store";
 import { useAuth } from "@/hooks/use-auth";
 import { fetchTorneo, fetchSlots, fetchFixture, teamFromSlot, avanzarRondaSiCorresponde, finalizarLigaSiCorresponde, asignarHoraPartido, esAdminDeTorneo } from "@/lib/football/tournament-api";
 import { resolverPartidoAutomatico } from "@/lib/football/tournament-bot-resolve";
+import { supabase } from "@/lib/supabase";
 import { computeStandings } from "@/lib/football/tournament-standings";
 import type { Tournament, TournamentSlot, TournamentFixtureMatch } from "@/lib/football/tournament-types";
 
@@ -176,12 +177,12 @@ export function TournamentHubScreen() {
     setResolviendoId(m.id);
     setError(null);
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error("Necesitás iniciar sesión para resolver este partido.");
       await resolverPartidoAutomatico({
-        match: m,
-        home,
-        away,
-        matchSettings: tournament.matchSettingsTemplate,
-        esEliminacionDirecta: tournament.format === "eliminacion_directa",
+        data: { torneo_partido_id: m.id },
+        headers: { Authorization: `Bearer ${accessToken}` },
       });
       await avanzarRondaSiCorresponde(tournamentId);
       await finalizarLigaSiCorresponde(tournamentId);

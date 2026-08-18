@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/lib/football/store";
 import { initMatch, substitute, tickMinute, possessionPct, computePlayerPositionRating, type MatchState } from "@/lib/football/engine";
-import { escribirResultadoTorneoPartido } from "@/lib/football/tournament-server-fns";
+import { guardarResultadoManualTorneo } from "@/lib/football/tournament-server-fns";
 import { simulatePenaltyShootout } from "@/lib/football/tournament-penalties";
+import { supabase } from "@/lib/supabase";
 import { autoLineup } from "@/lib/football/bot";
 import { FORMATION_LIST, slotsFor, slotGroup as slotGroupForPosition } from "@/lib/football/formations";
 import { LINE_HEIGHT_TABLE, BUILDUP_TABLE, PRESS_TABLE } from "@/lib/football/tactics";
@@ -91,20 +92,30 @@ export function MatchScreen() {
               : null;
           setTournamentPenaltyResult(penaltyResult);
 
-          escribirResultadoTorneoPartido({
-            data: {
-              torneo_partido_id: tournamentActiveMatchId,
-              resultado: {
-                homeGoals: s.teams[0].goals,
-                awayGoals: s.teams[1].goals,
-                stats: { players: s.playerStats },
-                events: s.events,
-                ...(penaltyResult ? { penalties: penaltyResult } : {}),
-              },
-            },
-          }).catch((err) => {
-            console.error("No se pudo guardar el resultado del torneo:", err);
-          });
+          supabase.auth
+            .getSession()
+            .then(({ data }) => {
+              const accessToken = data.session?.access_token;
+              if (!accessToken) {
+                throw new Error("Necesitás iniciar sesión para guardar el resultado del torneo.");
+              }
+              return guardarResultadoManualTorneo({
+                data: {
+                  torneo_partido_id: tournamentActiveMatchId,
+                  resultado: {
+                    homeGoals: s.teams[0].goals,
+                    awayGoals: s.teams[1].goals,
+                    stats: { players: s.playerStats },
+                    events: s.events,
+                    ...(penaltyResult ? { penalties: penaltyResult } : {}),
+                  },
+                },
+                headers: { Authorization: `Bearer ${accessToken}` },
+              });
+            })
+            .catch((err) => {
+              console.error("No se pudo guardar el resultado manual del torneo:", err);
+            });
         }
         setTimeout(() => setScreen("stats"), 1500);
       }

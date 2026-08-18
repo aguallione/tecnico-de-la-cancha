@@ -23,7 +23,7 @@ import { initMatch, tickMinute } from "./engine";
 import { serializeMatchState, deserializeMatchState, type SerializedMatchState } from "./serialization";
 import { minutoObjetivo } from "./tournament-pacing";
 import { simulatePenaltyShootout } from "./tournament-penalties";
-import { escribirResultadoTorneoPartido } from "./tournament-server-fns";
+import { escribirResultadoTorneoPartidoInterno } from "./tournament-server-fns";
 import {
   avanzarRondaSiCorresponde,
   finalizarLigaSiCorresponde,
@@ -176,17 +176,12 @@ export async function ponerAlDiaPartidoTorneo(
       ? simulatePenaltyShootout([state.teams[0], state.teams[1]]).result
       : undefined;
 
-  await escribirResultadoTorneoPartido({
-    data: {
-      torneo_partido_id: torneoPartidoId,
-      resultado: {
-        homeGoals: state.teams[0].goals,
-        awayGoals: state.teams[1].goals,
-        stats: { players: state.playerStats },
-        events: state.events,
-        ...(penalties ? { penalties } : {}),
-      },
-    },
+  await escribirResultadoTorneoPartidoInterno(torneoPartidoId, {
+    homeGoals: state.teams[0].goals,
+    awayGoals: state.teams[1].goals,
+    stats: { players: state.playerStats },
+    events: state.events,
+    ...(penalties ? { penalties } : {}),
   });
   return "termino";
 }
