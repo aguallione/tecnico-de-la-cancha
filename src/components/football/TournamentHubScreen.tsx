@@ -21,10 +21,9 @@ export function TournamentHubScreen() {
   const [error, setError] = useState<string | null>(null);
   const [resolviendoId, setResolviendoId] = useState<string | null>(null);
   const [horarioElegido, setHorarioElegido] = useState("");
-  const [guardandoHorario, setGuardandoHorario] = useState(false);
+  const [guardandoHorarioId, setGuardandoHorarioId] = useState<string | null>(null);
   const [soyAdminTorneo, setSoyAdminTorneo] = useState(false);
-  const [editandoHorario, setEditandoHorario] = useState(false);
-
+  const [editandoHorarioId, setEditandoHorarioId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!tournamentId) return;
@@ -32,11 +31,6 @@ export function TournamentHubScreen() {
     async function cargar() {
       setLoading(true);
       try {
-        // Red de seguridad: si por una conexión lenta el resultado del
-        // partido anterior llegó a Supabase después de que StatsScreen ya
-        // había intentado avanzar de ronda, esto lo vuelve a intentar acá.
-        // Es idempotente (avanzarRondaSiCorresponde ya lo garantiza), así
-        // que no hace nada si no hace falta.
         await avanzarRondaSiCorresponde(tournamentId!).catch((err) => {
           console.error("No se pudo avanzar de ronda al entrar al hub:", err);
         });
@@ -99,6 +93,24 @@ export function TournamentHubScreen() {
     });
   }
 
+  function valorHorarioLocal(fechaISO: string | undefined): string {
+    if (!fechaISO) return "";
+    const fecha = new Date(fechaISO);
+    const fechaLocal = new Date(fecha.getTime() - fecha.getTimezoneOffset() * 60000);
+    return fechaLocal.toISOString().slice(0, 16);
+  }
+
+  function comenzarEdicionHorario(m: TournamentFixtureMatch) {
+    setEditandoHorarioId(m.id);
+    setHorarioElegido(valorHorarioLocal(m.scheduledAt));
+    setError(null);
+  }
+
+  function cancelarEdicionHorario() {
+    setEditandoHorarioId(null);
+    setHorarioElegido("");
+  }
+
   const nombreSlot = (id: string) => slots.find((s) => s.id === id)?.displayName ?? "?";
   const esBot = (id: string) => slots.find((s) => s.id === id)?.teamConfig.isBot ?? false;
   const esLiga = tournament.format !== "eliminacion_directa";
@@ -108,15 +120,24 @@ export function TournamentHubScreen() {
   const pendientes = fixture
     .filter((m) => m.status === "pendiente")
     .sort((a, b) => {
-      // Priorizar partidos donde el usuario es partícipe
       const aEsMio = a.homeSlotId === miSlotId || a.awaySlotId === miSlotId;
       const bEsMio = b.homeSlotId === miSlotId || b.awaySlotId === miSlotId;
       if (aEsMio && !bEsMio) return -1;
       if (!aEsMio && bEsMio) return 1;
-      // Si ambos son míos o ninguno, ordenar por ronda
       return a.round - b.round;
     });
   const proximo = pendientes[0] ?? null;
+  const pendientesPorRonda = fixture
+    .filter((m) => m.status === "pendiente")
+    .sort((a, b) => {
+      if (a.round !== b.round) return a.round - b.round;
+      if (a.scheduledAt && b.scheduledAt) {
+        return new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime();
+      }
+      if (a.scheduledAt) return -1;
+      if (b.scheduledAt) return 1;
+      return (a.bracketPosition ?? 0) - (b.bracketPosition ?? 0);
+    });
   const jugados = fixture.filter((m) => m.status === "jugado");
 
   function jugarPartido(m: TournamentFixtureMatch) {
@@ -133,18 +154,18 @@ export function TournamentHubScreen() {
 
   async function guardarHorario(m: TournamentFixtureMatch) {
     if (!horarioElegido || !tournamentId) return;
-    setGuardandoHorario(true);
+    setGuardandoHorarioId(m.id);
     setError(null);
     try {
       await asignarHoraPartido(m.id, new Date(horarioElegido).toISOString());
       const f = await fetchFixture(tournamentId);
       setFixture(f);
       setHorarioElegido("");
-      setEditandoHorario(false);
+      setEditandoHorarioId(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo guardar el horario.");
     } finally {
-      setGuardandoHorario(false);
+      setGuardandoHorarioId(null);
     }
   }
 
@@ -224,98 +245,86 @@ export function TournamentHubScreen() {
                     )}
                   </div>
                 </div>
+
                 {!tournament.isOnline && (
-                  <>
-                    {esBot(proximo.homeSlotId) && esBot(proximo.awaySlotId) ? (
-                      <button
-                        className="btn-secondary disabled:opacity-50"
-                        disabled={resolviendoId === proximo.id}
-                        onClick={() => resolverAutomatico(proximo)}
-                      >
-                        {resolviendoId === proximo.id ? "Resolviendo..." : "Resolver automático"}
-                      </button>
-                    ) : (
-                      <button className="btn-primary" onClick={() => jugarPartido(proximo)}>
-                        Jugar →
-                      </button>
-                    )}
-                  </>
+                  esBot(proximo.homeSlotId) && esBot(proximo.awaySlotId) ? (
+                    <button
+                      className="btn-secondary disabled:opacity-50"
+                      disabled={resolviendoId === proximo.id}
+                      onClick={() => resolverAutomatico(proximo)}
+                    >
+                      {resolviendoId === proximo.id ? "Resolviendo..." : "Resolver automático"}
+                    </button>
+                  ) : (
+                    <button className="btn-primary" onClick={() => jugarPartido(proximo)}>
+                      Jugar →
+                    </button>
+                  )
                 )}
-                {tournament.isOnline && (
-                  <>
-                    {proximo.scheduledAt && !editandoHorario && (
-                      <div className="flex flex-col items-end gap-1">
-                        <button
-                          className="btn-primary"
-                          onClick={() => { setTournamentLiveMatchId(proximo.id); setScreen("tournament_match_live"); }}
-                        >
-                          Ver partido →
-                        </button>
-                        {soyAdminTorneo && (
-                          <button
-                            className="text-xs text-muted-foreground underline"
-                            onClick={() => setEditandoHorario(true)}
-                          >
-                            Editar horario
-                          </button>
-                        )}
-                      </div>
+
+                {tournament.isOnline && proximo.scheduledAt && editandoHorarioId !== proximo.id && (
+                  <div className="flex flex-col items-end gap-1">
+                    <button
+                      className="btn-primary"
+                      onClick={() => { setTournamentLiveMatchId(proximo.id); setScreen("tournament_match_live"); }}
+                    >
+                      Ver partido →
+                    </button>
+                    {soyAdminTorneo && (
+                      <button
+                        className="text-xs text-muted-foreground underline"
+                        onClick={() => comenzarEdicionHorario(proximo)}
+                      >
+                        Editar horario
+                      </button>
                     )}
-                    {proximo.scheduledAt && editandoHorario && soyAdminTorneo && (
-                      <div className="flex flex-col items-end gap-1 w-full sm:w-auto">
-                        <input
-                          type="datetime-local"
-                          className="input text-xs w-full"
-                          value={horarioElegido}
-                          onChange={(e) => setHorarioElegido(e.target.value)}
-                          min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
-                        />
-                        <div className="flex gap-2 w-full">
-                          <button
-                            className="btn-secondary text-xs flex-1"
-                            onClick={() => { setEditandoHorario(false); setHorarioElegido(""); }}
-                          >
-                            Cancelar
-                          </button>
-                          <button
-                            className="btn-primary text-xs disabled:opacity-50 flex-1"
-                            disabled={!horarioElegido || guardandoHorario}
-                            onClick={() => guardarHorario(proximo)}
-                          >
-                            {guardandoHorario ? "Guardando..." : "Guardar"}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    {!proximo.scheduledAt && soyAdminTorneo && tournament.modoHorario === "manual" && (
-                      <div className="flex flex-col items-end gap-1 w-full sm:w-auto">
-                        <input
-                          type="datetime-local"
-                          className="input text-xs w-full"
-                          value={horarioElegido}
-                          onChange={(e) => setHorarioElegido(e.target.value)}
-                          min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
-                        />
-                        <button
-                          className="btn-primary text-xs disabled:opacity-50 w-full"
-                          disabled={!horarioElegido || guardandoHorario}
-                          onClick={() => guardarHorario(proximo)}
-                        >
-                          {guardandoHorario ? "Guardando..." : "Asignar horario"}
-                        </button>
-                      </div>
-                    )}
-                    {!proximo.scheduledAt && soyAdminTorneo && tournament.modoHorario !== "manual" && (
-                      <span className="text-xs text-muted-foreground">
-                        El torneo usa horario automático. El sistema asignará la hora.
-                      </span>
-                    )}
-                    {!proximo.scheduledAt && !soyAdminTorneo && (
-                      <span className="text-xs text-muted-foreground">Esperando que un admin asigne el horario.</span>
-                    )}
-                  </>
+                  </div>
+                )}
+
+                {tournament.isOnline && editandoHorarioId === proximo.id && soyAdminTorneo && (
+                  <div className="flex flex-col items-end gap-1 w-full sm:w-auto">
+                    <input
+                      type="datetime-local"
+                      className="input text-xs w-full"
+                      value={horarioElegido}
+                      onChange={(e) => setHorarioElegido(e.target.value)}
+                      min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+                    />
+                    <div className="flex gap-2 w-full">
+                      <button
+                        className="btn-secondary text-xs flex-1"
+                        onClick={cancelarEdicionHorario}
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        className="btn-primary text-xs disabled:opacity-50 flex-1"
+                        disabled={!horarioElegido || guardandoHorarioId === proximo.id}
+                        onClick={() => guardarHorario(proximo)}
+                      >
+                        {guardandoHorarioId === proximo.id ? "Guardando..." : "Guardar"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {tournament.isOnline && !proximo.scheduledAt && soyAdminTorneo && tournament.modoHorario === "manual" && editandoHorarioId !== proximo.id && (
+                  <button className="btn-primary text-xs" onClick={() => comenzarEdicionHorario(proximo)}>
+                    Asignar horario
+                  </button>
+                )}
+
+                {tournament.isOnline && !proximo.scheduledAt && soyAdminTorneo && tournament.modoHorario !== "manual" && (
+                  <span className="text-xs text-muted-foreground">
+                    El torneo usa horario automático. El sistema asignará la hora.
+                  </span>
+                )}
+
+                {tournament.isOnline && !proximo.scheduledAt && !soyAdminTorneo && (
+                  <span className="text-xs text-muted-foreground">Esperando que un admin asigne el horario.</span>
                 )}
               </div>
+
               {tournament.isOnline && proximo.scheduledAt && (
                 <div className="text-xs text-muted-foreground border-t border-border pt-2 mt-1">
                   {new Date(proximo.scheduledAt) > new Date() ? (
@@ -339,6 +348,72 @@ export function TournamentHubScreen() {
             </p>
           )}
         </div>
+
+        {/* Calendario de partidos pendientes */}
+        {tournament.isOnline && pendientesPorRonda.length > 0 && (
+          <div className="card p-4 mt-4">
+            <h2 className="font-display text-lg font-bold">Calendario del torneo</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              Partidos pendientes ordenados por ronda.
+            </p>
+            <div className="mt-3 divide-y divide-border">
+              {pendientesPorRonda.map((m) => (
+                <div key={m.id} className="py-3 first:pt-0 last:pb-0">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                      <div className="text-sm font-medium">
+                        {nombreSlot(m.homeSlotId)} vs {nombreSlot(m.awaySlotId)}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Ronda {m.round} · {formatHorario(m.scheduledAt)}
+                      </div>
+                    </div>
+
+                    {soyAdminTorneo && editandoHorarioId !== m.id && (
+                      m.scheduledAt || tournament.modoHorario === "manual" ? (
+                        <button
+                          className="btn-secondary text-xs"
+                          onClick={() => comenzarEdicionHorario(m)}
+                        >
+                          {m.scheduledAt ? "Editar horario" : "Asignar horario"}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          Horario automático pendiente
+                        </span>
+                      )
+                    )}
+                  </div>
+
+                  {soyAdminTorneo && editandoHorarioId === m.id && (
+                    <div className="mt-2 flex items-center justify-end gap-2 flex-wrap">
+                      <input
+                        type="datetime-local"
+                        className="input text-xs w-full sm:w-auto"
+                        value={horarioElegido}
+                        onChange={(e) => setHorarioElegido(e.target.value)}
+                        min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+                      />
+                      <button
+                        className="btn-secondary text-xs"
+                        onClick={cancelarEdicionHorario}
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        className="btn-primary text-xs disabled:opacity-50"
+                        disabled={!horarioElegido || guardandoHorarioId === m.id}
+                        onClick={() => guardarHorario(m)}
+                      >
+                        {guardandoHorarioId === m.id ? "Guardando..." : "Guardar"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Cuadro de eliminación (Copa) */}
         {!esLiga && <TournamentBracket fixture={fixture} nombreSlot={nombreSlot} />}
@@ -449,7 +524,6 @@ function BracketMatch({
       ? (match.result.penalties.homeGoals > match.result.penalties.awayGoals ? match.homeSlotId : match.awaySlotId)
       : (match.result.homeGoals >= match.result.awayGoals ? match.homeSlotId : match.awaySlotId);
   } else if (match.status === "walkover") {
-    // No hay result explícito en un walkover — se muestra el cruce sin resaltar ganador.
     ganadorId = null;
   }
 
