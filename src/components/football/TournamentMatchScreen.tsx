@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "@/lib/football/store";
-import { fetchTorneoPartido, fetchTorneo } from "@/lib/football/tournament-api";
+import { fetchTorneoPartido } from "@/lib/football/tournament-api";
 import { fetchPartida } from "@/lib/online/api";
+import { supabase } from "@/lib/supabase";
 import { avanzarPartidoTorneoEnVivo } from "@/lib/football/tournament-live-server-fns";
 import { deserializeMatchState } from "@/lib/football/serialization";
 import { possessionPct } from "@/lib/football/engine";
@@ -71,10 +72,9 @@ function formatearMensaje(mensaje: string, minutosRestantes: number): string {
 }
 
 export function TournamentMatchScreen() {
-  const { tournamentLiveMatchId, tournamentId, setScreen } = useGame();
+  const { tournamentLiveMatchId, setScreen } = useGame();
 
   const [match, setMatch] = useState<TournamentFixtureMatch | null>(null);
-  const [formato, setFormato] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [transicionando, setTransicionando] = useState(false);
 
@@ -82,15 +82,6 @@ export function TournamentMatchScreen() {
   const bolsaRef = useRef<string[]>(barajar(MENSAJES_ESPERA));
   const [indiceMensaje, setIndiceMensaje] = useState(0);
   const [mensajeVisible, setMensajeVisible] = useState(true);
-
-  // Formato del torneo (necesario para saber si un empate al terminar el
-  // partido va a penales) — se trae una sola vez, es un dato que no cambia.
-  useEffect(() => {
-    if (!tournamentId) return;
-    fetchTorneo(tournamentId)
-      .then((t) => setFormato(t.format))
-      .catch(() => {});
-  }, [tournamentId]);
 
   // ── Polling del estado del partido ─────────────────────────────────────────
   useEffect(() => {
@@ -119,7 +110,10 @@ export function TournamentMatchScreen() {
 
     consultar();
     const id = setInterval(consultar, POLL_MS);
-    return () => { cancelado = true; clearInterval(id); };
+    return () => {
+      cancelado = true;
+      clearInterval(id);
+    };
   }, [tournamentLiveMatchId]);
 
   useEffect(() => {
@@ -159,7 +153,9 @@ export function TournamentMatchScreen() {
       <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
         <div className="text-center">
           <p>No hay ningún partido en seguimiento.</p>
-          <button className="btn-primary mt-4" onClick={() => setScreen("tournament_hub")}>← Volver al torneo</button>
+          <button className="btn-primary mt-4" onClick={() => setScreen("tournament_hub")}>
+            ← Volver al torneo
+          </button>
         </div>
       </div>
     );
@@ -169,8 +165,12 @@ export function TournamentMatchScreen() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4">
         <div className="text-center">
-          <p className="text-sm text-destructive-foreground bg-destructive rounded px-3 py-2">{error}</p>
-          <button className="btn-primary mt-4" onClick={() => setScreen("tournament_hub")}>← Volver al torneo</button>
+          <p className="text-sm text-destructive-foreground bg-destructive rounded px-3 py-2">
+            {error}
+          </p>
+          <button className="btn-primary mt-4" onClick={() => setScreen("tournament_hub")}>
+            ← Volver al torneo
+          </button>
         </div>
       </div>
     );
@@ -209,10 +209,9 @@ export function TournamentMatchScreen() {
   }
 
   if (match.status === "en_curso") {
-    if (!match.partidaOnlineId || !formato) {
-      // Ventana chica entre que el vigilante marca "en_curso" y crea la
-      // partidas_online (o mientras todavía no llegó el fetch del formato) —
-      // se resuelve solo en el próximo poll (5s).
+    if (!match.partidaOnlineId) {
+      // Ventana chica entre que el vigilante marca "en_curso" y queda
+      // disponible la partidas_online — se resuelve sola en el próximo poll.
       return (
         <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
           <p className="text-muted-foreground">Preparando el partido...</p>
@@ -223,7 +222,6 @@ export function TournamentMatchScreen() {
       <TournamentLiveMatchView
         torneoPartidoId={match.id}
         partidaOnlineId={match.partidaOnlineId}
-        formato={formato}
         onVolver={() => setScreen("tournament_hub")}
       />
     );
@@ -243,7 +241,11 @@ export function TournamentMatchScreen() {
       <div className="text-xs uppercase tracking-[0.3em] text-lime-300/80">Sala de espera</div>
       <div className="mt-3 font-display text-3xl font-black">
         {match.scheduledAt
-          ? new Date(match.scheduledAt).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" })
+          ? new Date(match.scheduledAt).toLocaleString(undefined, {
+              weekday: "short",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
           : "Horario a confirmar"}
       </div>
       <div className="mt-10 h-16 flex items-center justify-center max-w-md text-center">
@@ -277,12 +279,10 @@ const POLL_PARTIDA_MS = 5000;
 function TournamentLiveMatchView({
   torneoPartidoId,
   partidaOnlineId,
-  formato,
   onVolver,
 }: {
   torneoPartidoId: string;
   partidaOnlineId: string;
-  formato: string;
   onVolver: () => void;
 }) {
   const [partida, setPartida] = useState<PartidaOnline | null>(null);
@@ -301,11 +301,20 @@ function TournamentLiveMatchView({
 
         if (p.estado === "jugando" && !disparandoRef.current) {
           disparandoRef.current = true;
-          avanzarPartidoTorneoEnVivo({
-            data: { torneo_partido_id: torneoPartidoId, partida_online_id: partidaOnlineId, formato },
-          })
+          supabase.auth
+            .getSession()
+            .then(({ data: sessionData }) => {
+              const accessToken = sessionData.session?.access_token;
+              if (!accessToken) throw new Error("Necesitás iniciar sesión para ver este partido.");
+              return avanzarPartidoTorneoEnVivo({
+                data: { torneo_partido_id: torneoPartidoId },
+                headers: { Authorization: `Bearer ${accessToken}` },
+              });
+            })
             .catch(() => {})
-            .finally(() => { disparandoRef.current = false; });
+            .finally(() => {
+              disparandoRef.current = false;
+            });
         }
       } catch (e) {
         if (!cancelado) setError(e instanceof Error ? e.message : "No se pudo cargar el partido.");
@@ -314,8 +323,11 @@ function TournamentLiveMatchView({
 
     consultar();
     const id = setInterval(consultar, POLL_PARTIDA_MS);
-    return () => { cancelado = true; clearInterval(id); };
-  }, [partidaOnlineId, torneoPartidoId, formato]);
+    return () => {
+      cancelado = true;
+      clearInterval(id);
+    };
+  }, [partidaOnlineId, torneoPartidoId]);
 
   const state = useMemo(
     () => (partida?.match_state ? deserializeMatchState(partida.match_state) : null),
@@ -326,8 +338,12 @@ function TournamentLiveMatchView({
     return (
       <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4">
         <div className="text-center">
-          <p className="text-sm text-destructive-foreground bg-destructive rounded px-3 py-2">{error}</p>
-          <button className="btn-secondary mt-4" onClick={onVolver}>← Volver al torneo</button>
+          <p className="text-sm text-destructive-foreground bg-destructive rounded px-3 py-2">
+            {error}
+          </p>
+          <button className="btn-secondary mt-4" onClick={onVolver}>
+            ← Volver al torneo
+          </button>
         </div>
       </div>
     );
@@ -350,7 +366,9 @@ function TournamentLiveMatchView({
       <div className="sticky top-0 z-20 bg-pitch text-pitch-foreground shadow-md">
         <div className="max-w-3xl mx-auto px-4 py-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
           <div className="text-right min-w-0">
-            <div className="font-display font-black text-sm sm:text-base truncate">{teamA.config.name}</div>
+            <div className="font-display font-black text-sm sm:text-base truncate">
+              {teamA.config.name}
+            </div>
             <div className="text-[10px] uppercase tracking-wider text-lime-200/70">
               {teamA.formation} · {teamA.style}
             </div>
@@ -364,7 +382,9 @@ function TournamentLiveMatchView({
             </div>
           </div>
           <div className="text-left min-w-0">
-            <div className="font-display font-black text-sm sm:text-base truncate">{teamB.config.name}</div>
+            <div className="font-display font-black text-sm sm:text-base truncate">
+              {teamB.config.name}
+            </div>
             <div className="text-[10px] uppercase tracking-wider text-lime-200/70">
               {teamB.formation} · {teamB.style}
             </div>
@@ -375,18 +395,24 @@ function TournamentLiveMatchView({
       <div className="max-w-3xl mx-auto px-4 mt-4">
         <div className="card p-3 text-xs flex items-center justify-between">
           <span>Posesión</span>
-          <span className="font-display tabular-nums">{posA}% · {posB}%</span>
+          <span className="font-display tabular-nums">
+            {posA}% · {posB}%
+          </span>
         </div>
         {state.finished && (
           <div className="card p-3 mt-3 text-center bg-primary/10 border border-primary/30">
             <p className="text-sm">Este partido ya terminó.</p>
-            <button className="btn-primary mt-2" onClick={onVolver}>Volver al torneo →</button>
+            <button className="btn-primary mt-2" onClick={onVolver}>
+              Volver al torneo →
+            </button>
           </div>
         )}
         <div className="mt-3 space-y-2">
           {[...state.events].reverse().map((ev, i) => (
             <div key={i} className="card p-3 text-sm">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{ev.minute}'</div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                {ev.minute}'
+              </div>
               <div className="mt-0.5">{ev.text}</div>
             </div>
           ))}

@@ -20,7 +20,11 @@
 import { getServiceClient } from "@/lib/online/supabase-server";
 import { generarCodigo } from "@/lib/online/api";
 import { initMatch, tickMinute } from "./engine";
-import { serializeMatchState, deserializeMatchState, type SerializedMatchState } from "./serialization";
+import {
+  serializeMatchState,
+  deserializeMatchState,
+  type SerializedMatchState,
+} from "./serialization";
 import { minutoObjetivo } from "./tournament-pacing";
 import { simulatePenaltyShootout } from "./tournament-penalties";
 import { escribirResultadoTorneoPartidoInterno } from "./tournament-server-fns";
@@ -65,7 +69,9 @@ async function arrancarPartidosVencidos(): Promise<{ arrancados: number; errores
   if (error) throw new Error(error.message);
   if (!filasRaw || filasRaw.length === 0) return { arrancados: 0, errores: [] };
 
-  for (const row of filasRaw as Array<TorneoPartidoRow & { torneos: { config_partido: MatchSettings } }>) {
+  for (const row of filasRaw as Array<
+    TorneoPartidoRow & { torneos: { config_partido: MatchSettings } }
+  >) {
     try {
       const match = rowToFixtureMatch(row);
 
@@ -125,8 +131,9 @@ async function arrancarPartidosVencidos(): Promise<{ arrancados: number; errores
  * una vez por minuto) y el polling del navegador cuando alguien está
  * mirando en vivo (que la llama cada 5 segundos, para un ritmo suave) —
  * así el comportamiento es idéntico sea quien sea el que la dispare.
- * No valida nada de autorización — quien la exponga al cliente (ver
- * tournament-server-fns.ts) es responsable de esa parte.
+ * No valida nada de autorización — quien la exponga al cliente es responsable
+ * de esa parte. Las escrituras usan control optimista para que dos llamadas
+ * simultáneas no apliquen dos veces el mismo tramo de simulación.
  */
 export async function ponerAlDiaPartidoTorneo(
   torneoPartidoId: string,
@@ -137,7 +144,7 @@ export async function ponerAlDiaPartidoTorneo(
 
   const { data: partida, error: partidaError } = await supabase
     .from("partidas_online")
-    .select("id, estado, match_state, creado_en")
+    .select("id, estado, match_state, creado_en, actualizado_en")
     .eq("id", partidaOnlineId)
     .maybeSingle();
   if (partidaError) throw new Error(partidaError.message);
@@ -156,19 +163,33 @@ export async function ponerAlDiaPartidoTorneo(
   if (state.minute === minutoInicial && !state.finished) return "sin_cambios";
 
   if (!state.finished) {
-    const { error: updateError } = await supabase
+    const { data: actualizada, error: updateError } = await supabase
       .from("partidas_online")
       .update({ match_state: serializeMatchState(state), actualizado_en: new Date().toISOString() })
-      .eq("id", partida.id);
+      .eq("id", partida.id)
+      .eq("estado", "jugando")
+      .eq("actualizado_en", partida.actualizado_en)
+      .select("id")
+      .maybeSingle();
     if (updateError) throw new Error(updateError.message);
+    if (!actualizada) return "sin_cambios";
     return "avanzo";
   }
 
-  const { error: cierrePartidaError } = await supabase
+  const { data: partidaCerrada, error: cierrePartidaError } = await supabase
     .from("partidas_online")
-    .update({ match_state: serializeMatchState(state), estado: "terminado", actualizado_en: new Date().toISOString() })
-    .eq("id", partida.id);
+    .update({
+      match_state: serializeMatchState(state),
+      estado: "terminado",
+      actualizado_en: new Date().toISOString(),
+    })
+    .eq("id", partida.id)
+    .eq("estado", "jugando")
+    .eq("actualizado_en", partida.actualizado_en)
+    .select("id")
+    .maybeSingle();
   if (cierrePartidaError) throw new Error(cierrePartidaError.message);
+  if (!partidaCerrada) return "sin_cambios";
 
   const empatado = state.teams[0].goals === state.teams[1].goals;
   const penalties =
@@ -192,7 +213,11 @@ export async function ponerAlDiaPartidoTorneo(
  * terminan, escribe el resultado final (con penales si corresponde) y
  * avanza el torneo.
  */
-async function avanzarPartidosEnCurso(): Promise<{ avanzados: number; terminados: number; errores: string[] }> {
+async function avanzarPartidosEnCurso(): Promise<{
+  avanzados: number;
+  terminados: number;
+  errores: string[];
+}> {
   const supabase = getServiceClient();
   const errores: string[] = [];
   let avanzados = 0;
@@ -211,9 +236,16 @@ async function avanzarPartidosEnCurso(): Promise<{ avanzados: number; terminados
 
   for (const row of filasRaw as Array<TorneoPartidoRow & { torneos: { formato: string } }>) {
     try {
-      const resultado = await ponerAlDiaPartidoTorneo(row.id, row.partida_online_id!, row.torneos.formato);
+      const resultado = await ponerAlDiaPartidoTorneo(
+        row.id,
+        row.partida_online_id!,
+        row.torneos.formato,
+      );
       if (resultado === "avanzo") avanzados++;
-      if (resultado === "termino") { avanzados++; terminados++; }
+      if (resultado === "termino") {
+        avanzados++;
+        terminados++;
+      }
       if (resultado !== "sin_cambios") torneoIdsAfectados.add(row.torneo_id);
     } catch (e) {
       errores.push(`Avance partido ${row.id}: ${e instanceof Error ? e.message : String(e)}`);
@@ -224,12 +256,16 @@ async function avanzarPartidosEnCurso(): Promise<{ avanzados: number; terminados
     try {
       await avanzarRondaSiCorresponde(torneoId);
     } catch (e) {
-      errores.push(`Avance de ronda, torneo ${torneoId}: ${e instanceof Error ? e.message : String(e)}`);
+      errores.push(
+        `Avance de ronda, torneo ${torneoId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
     try {
       await finalizarLigaSiCorresponde(torneoId);
     } catch (e) {
-      errores.push(`Cierre de liga, torneo ${torneoId}: ${e instanceof Error ? e.message : String(e)}`);
+      errores.push(
+        `Cierre de liga, torneo ${torneoId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
 
