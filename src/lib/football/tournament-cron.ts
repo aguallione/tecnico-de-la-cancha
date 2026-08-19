@@ -149,10 +149,13 @@ export async function ponerAlDiaPartidoTorneo(
     .maybeSingle();
   if (partidaError) throw new Error(partidaError.message);
   if (!partida || !partida.match_state) return "sin_cambios";
-  if (partida.estado !== "jugando") return "sin_cambios";
 
   const state = deserializeMatchState(partida.match_state as SerializedMatchState);
-  if (state.finished) return "sin_cambios";
+  if (partida.estado === "terminado") {
+    if (!state.finished) return "sin_cambios";
+    return guardarResultadoFinalSiPendiente(torneoPartidoId, formato, state);
+  }
+  if (partida.estado !== "jugando") return "sin_cambios";
 
   const segundosTranscurridos = (Date.now() - new Date(partida.creado_en).getTime()) / 1000;
   const objetivo = minutoObjetivo(segundosTranscurridos);
@@ -191,19 +194,51 @@ export async function ponerAlDiaPartidoTorneo(
   if (cierrePartidaError) throw new Error(cierrePartidaError.message);
   if (!partidaCerrada) return "sin_cambios";
 
+  return guardarResultadoFinalSiPendiente(torneoPartidoId, formato, state);
+}
+
+async function guardarResultadoFinalSiPendiente(
+  torneoPartidoId: string,
+  formato: string,
+  state: ReturnType<typeof deserializeMatchState>,
+): Promise<"termino" | "sin_cambios"> {
+  const supabase = getServiceClient();
+  const { data: partido, error: partidoError } = await supabase
+    .from("torneo_partidos")
+    .select("estado, resultado")
+    .eq("id", torneoPartidoId)
+    .maybeSingle();
+  if (partidoError) throw new Error(partidoError.message);
+  if (!partido) throw new Error("El partido de torneo no existe.");
+  if (partido.estado === "jugado" && partido.resultado) return "sin_cambios";
+  if (partido.estado !== "en_curso" || partido.resultado) {
+    throw new Error("El partido de torneo no admite guardar el resultado final.");
+  }
+
   const empatado = state.teams[0].goals === state.teams[1].goals;
   const penalties =
     formato === "eliminacion_directa" && empatado
       ? simulatePenaltyShootout([state.teams[0], state.teams[1]]).result
       : undefined;
 
-  await escribirResultadoTorneoPartidoInterno(torneoPartidoId, {
-    homeGoals: state.teams[0].goals,
-    awayGoals: state.teams[1].goals,
-    stats: { players: state.playerStats },
-    events: state.events,
-    ...(penalties ? { penalties } : {}),
-  });
+  try {
+    await escribirResultadoTorneoPartidoInterno(torneoPartidoId, {
+      homeGoals: state.teams[0].goals,
+      awayGoals: state.teams[1].goals,
+      stats: { players: state.playerStats },
+      events: state.events,
+      ...(penalties ? { penalties } : {}),
+    });
+  } catch (error) {
+    const { data: completado, error: comprobacionError } = await supabase
+      .from("torneo_partidos")
+      .select("estado, resultado")
+      .eq("id", torneoPartidoId)
+      .maybeSingle();
+    if (comprobacionError) throw new Error(comprobacionError.message);
+    if (completado?.estado === "jugado" && completado.resultado) return "sin_cambios";
+    throw error;
+  }
   return "termino";
 }
 

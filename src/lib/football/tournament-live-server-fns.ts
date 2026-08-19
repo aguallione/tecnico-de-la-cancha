@@ -31,7 +31,9 @@ export const avanzarPartidoTorneoEnVivo = createServerFn({ method: "POST" })
 
     const { data: partido, error: partidoError } = await supabase
       .from("torneo_partidos")
-      .select("id, partida_online_id, torneos!inner(id, creado_por, es_online, formato)")
+      .select(
+        "id, estado, partida_online_id, torneos!inner(id, creado_por, es_online, estado, formato)",
+      )
       .eq("id", data.torneo_partido_id)
       .maybeSingle();
     if (partidoError) throw new Error(partidoError.message);
@@ -41,9 +43,12 @@ export const avanzarPartidoTorneoEnVivo = createServerFn({ method: "POST" })
       id: string;
       creado_por: string;
       es_online: boolean;
+      estado: string;
       formato: string;
     };
     if (!torneo.es_online) throw new Error("Este partido no pertenece a un torneo online.");
+    if (torneo.estado !== "en_curso") throw new Error("El torneo no está en curso.");
+    if (partido.estado !== "en_curso") throw new Error("El partido de torneo no está en curso.");
     if (!partido.partida_online_id)
       throw new Error("El partido online todavía no está disponible.");
 
