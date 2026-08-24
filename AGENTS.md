@@ -53,3 +53,100 @@
 - Los administradores del torneo pueden asignar o editar horarios de partidos pendientes. Los usuarios que no son administradores ven el calendario sin los controles de edición.
 - Los consejos de IA se generan por equipo humano, no para bots, y la pantalla online filtra los consejos para mostrar a cada jugador solamente los de su equipo.
 - Este contexto describe el estado observado en el commit `f7ca132` (`Permitir editar horarios de todos los partidos pendientes`). Debe volver a verificarse en los archivos reales y el historial antes de usarlo en tareas futuras.
+
+
+## Nueva etapa: desarrollo del Modo Club
+
+El proyecto incorporará un Modo Club online de gestión de una temporada.
+
+Antes de modificar código relacionado con esta etapa, leer:
+
+- docs/MODO_CLUB_V1.md
+- docs/REFERENCIAS_VISUALES.md
+- docs/PROGRESO_MODO_CLUB.md
+
+Si posteriormente existen, también leer los documentos específicos de:
+
+- Economía.
+- Estadísticas.
+- Mercado.
+- Subastas.
+- Motor del partido.
+- Tácticas.
+- Instalaciones.
+- Base de datos de clubes.
+- Plan de trabajo.
+
+### Prioridad de instrucciones
+
+1. Decisiones expresas del propietario del proyecto.
+2. Documentación del Modo Club.
+3. Arquitectura y funcionalidades existentes.
+4. Referencias visuales o funcionales de otros juegos.
+
+No inventar decisiones que no estén definidas.
+Cuando exista una duda importante, marcarla como pendiente.
+
+### Estado del repositorio
+
+La rama main es la referencia principal y contiene la versión más
+actualizada del proyecto publicada en GitHub.
+
+Antes de modificar una funcionalidad:
+
+- Revisar el código existente.
+- Identificar componentes reutilizables.
+- Evitar duplicar sistemas.
+- Preservar el funcionamiento actual.
+- Mantener las funcionalidades existentes de torneos.
+- Ejecutar las pruebas o verificaciones disponibles.
+
+### Identidad del producto
+
+- Simulador de director técnico y gestión futbolística.
+- Modo Club diferenciado del resto de la aplicación.
+- Estética principal inspirada en Top Eleven.
+- Gestión inspirada parcialmente en OSM.
+- Estadísticas inspiradas en SofaScore.
+- Diseño adaptable a computadora y celular.
+- Modo Club preferentemente horizontal.
+
+### Reglas del producto
+
+- Sin moneda prémium.
+- Sin tokens.
+- Sin pagos para obtener ventajas.
+- Sin aceleraciones pagas.
+- Sin chat dentro del Modo Club.
+- Sin chat dentro de torneos.
+- Sin chat dentro de partidos.
+- Partidas privadas mediante código.
+- Equipos actuales e históricos.
+- Equipos personalizados solamente si los aporta el administrador.
+- Copias independientes de clubes y jugadores por temporada.
+- Moral y fatiga relevantes.
+- Economía coherente y sin endeudamiento en la primera versión.
+- Velocidad online de partido x10.
+- Estadísticas basadas en eventos reales del motor.
+- Las reglas de cada temporada deben conservarse una vez iniciada.
+
+### Seguridad
+
+- No exponer secretos ni credenciales.
+- No modificar archivos .env para incorporarlos al repositorio.
+- Validar permisos administrativos.
+- Validar operaciones económicas en servidor.
+- Respetar las políticas de acceso de Supabase.
+- Evitar operaciones destructivas.
+- No modificar repomix-output.xml salvo que la tarea lo solicite
+  expresamente.
+
+### Seguimiento
+
+Al finalizar cada tarea:
+
+1. Explicar qué se implementó.
+2. Listar los archivos modificados.
+3. Informar qué pruebas se ejecutaron.
+4. Señalar pendientes.
+5. Actualizar docs/PROGRESO_MODO_CLUB.md cuando corresponda.
