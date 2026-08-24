@@ -109,7 +109,10 @@ Antes de modificar una funcionalidad:
 - Gestión inspirada parcialmente en OSM.
 - Estadísticas inspiradas en SofaScore.
 - Diseño adaptable a computadora y celular.
-- Modo Club preferentemente horizontal.
+- El Modo Club está diseñado para utilizarse horizontalmente.
+- En web o PWA, intentar bloquear la orientación cuando el navegador lo permita.
+- Si el bloqueo no está disponible, mostrar una indicación para girar el dispositivo.
+- El resto de la aplicación puede conservar su orientación vertical.
 
 ### Reglas del producto
 
@@ -122,7 +125,8 @@ Antes de modificar una funcionalidad:
 - Sin chat dentro de partidos.
 - Partidas privadas mediante código.
 - Equipos actuales e históricos.
-- Equipos personalizados solamente si los aporta el administrador.
+- Los equipos personalizados solamente pueden ser aportados por el creador o propietario de la partida.
+- Los demás administradores y participantes no pueden incorporar equipos propios.
 - Copias independientes de clubes y jugadores por temporada.
 - Moral y fatiga relevantes.
 - Economía coherente y sin endeudamiento en la primera versión.
